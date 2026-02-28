@@ -122,7 +122,7 @@ int main() {
             if (rel_path.find("..") != std::string::npos)
                 throw mcp::mcp_exception(mcp::error_code::invalid_params, "path must not contain '..'");
 
-            std::string full_path = knowledge_dir + "/" + rel_path;
+            std::filesystem::path full_path = std::filesystem::path(knowledge_dir) / std::filesystem::u8path(rel_path);
             std::ifstream ifs(full_path);
             if (!ifs.is_open())
                 throw mcp::mcp_exception(mcp::error_code::invalid_params, "file not found: " + rel_path);
@@ -167,7 +167,7 @@ int main() {
             if (rel.find("..") != std::string::npos)
                 throw mcp::mcp_exception(mcp::error_code::invalid_params, "path must not contain '..'");
 
-            fs::path dir = fs::path(knowledge_dir) / rel;
+            fs::path dir = fs::path(knowledge_dir) / (rel.empty() ? fs::path() : fs::u8path(rel));
             if (!fs::exists(dir) || !fs::is_directory(dir))
                 throw mcp::mcp_exception(mcp::error_code::invalid_params, "directory not found: " + rel);
 
