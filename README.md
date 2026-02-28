@@ -20,7 +20,9 @@
 				"search_wiki",
 				"get_netease_diff",
 				"get_netease_jsonui",
-				"search_qumod"
+				"search_qumod",
+				"list_knowledge",
+				"read_knowledge"
 			],
 			"timeout": 30
 		}

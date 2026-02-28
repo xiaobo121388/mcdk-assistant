@@ -4,6 +4,8 @@
 #include <mcp_message.h>
 #include <iostream>
 #include <string>
+#include <fstream>
+#include <climits>
 #include <filesystem>
 
 #ifdef _WIN32
@@ -99,6 +101,92 @@ int main() {
             }
         );
     }
+
+    // 读取 knowledge 目录下指定文件内容（支持行范围）
+    auto read_tool = mcp::tool_builder("read_knowledge")
+        .with_description("读取 knowledge 目录下的指定文件内容，搜索结果中的 file 字段可直接作为 path 参数传入")
+        .with_string_param("path", "文件相对路径（相对于 knowledge 目录），如 BedrockWiki/items/items-intro.md", true)
+        .with_number_param("line_start", "起始行号（1-based），不传则从第1行开始", false)
+        .with_number_param("line_end", "结束行号（1-based，含），不传则读到文件末尾", false)
+        .with_read_only_hint(true)
+        .with_idempotent_hint(true)
+        .build();
+
+    srv.register_tool(read_tool,
+        [&knowledge_dir](const mcp::json& params, const std::string&) -> mcp::json {
+            std::string rel_path = params.value("path", "");
+            if (rel_path.empty())
+                throw mcp::mcp_exception(mcp::error_code::invalid_params, "path is required");
+
+            // 安全检查：禁止路径穿越
+            if (rel_path.find("..") != std::string::npos)
+                throw mcp::mcp_exception(mcp::error_code::invalid_params, "path must not contain '..'");
+
+            std::string full_path = knowledge_dir + "/" + rel_path;
+            std::ifstream ifs(full_path);
+            if (!ifs.is_open())
+                throw mcp::mcp_exception(mcp::error_code::invalid_params, "file not found: " + rel_path);
+
+            int line_start = params.contains("line_start") && !params["line_start"].is_null()
+                ? params["line_start"].get<int>() : 1;
+            int line_end = params.contains("line_end") && !params["line_end"].is_null()
+                ? params["line_end"].get<int>() : INT_MAX;
+
+            if (line_start < 1) line_start = 1;
+            if (line_end < line_start) line_end = line_start;
+
+            std::string result;
+            std::string line;
+            int cur = 0;
+            while (std::getline(ifs, line)) {
+                ++cur;
+                if (cur < line_start) continue;
+                if (cur > line_end) break;
+                result += line;
+                result += '\n';
+            }
+
+            return {{"content", mcp::json::array({{{"type","text"},{"text", result},
+                {"file", rel_path}, {"line_start", line_start},
+                {"line_end", std::min(cur, line_end)}, {"total_lines", cur}}})}};
+        }
+    );
+
+    // 列出 knowledge 目录下的文件和文件夹
+    auto list_tool = mcp::tool_builder("list_knowledge")
+        .with_description("列出 knowledge 目录下指定路径的文件和文件夹列表")
+        .with_string_param("path", "相对路径（相对于 knowledge 目录），默认为根目录", false)
+        .with_read_only_hint(true)
+        .with_idempotent_hint(true)
+        .build();
+
+    srv.register_tool(list_tool,
+        [&knowledge_dir](const mcp::json& params, const std::string&) -> mcp::json {
+            namespace fs = std::filesystem;
+            std::string rel = params.value("path", "");
+            if (rel.find("..") != std::string::npos)
+                throw mcp::mcp_exception(mcp::error_code::invalid_params, "path must not contain '..'");
+
+            fs::path dir = fs::path(knowledge_dir) / rel;
+            if (!fs::exists(dir) || !fs::is_directory(dir))
+                throw mcp::mcp_exception(mcp::error_code::invalid_params, "directory not found: " + rel);
+
+            mcp::json dirs = mcp::json::array();
+            mcp::json files = mcp::json::array();
+            for (const auto& entry : fs::directory_iterator(dir)) {
+                auto name = entry.path().filename().u8string();
+                std::string name_str(reinterpret_cast<const char*>(name.data()), name.size());
+                if (entry.is_directory()) dirs.push_back(name_str);
+                else files.push_back(name_str);
+            }
+
+            std::string text = "目录: " + (rel.empty() ? "/" : rel) + "\n";
+            for (const auto& d : dirs) text += "[DIR]  " + d.get<std::string>() + "\n";
+            for (const auto& f : files) text += "       " + f.get<std::string>() + "\n";
+
+            return {{"content", mcp::json::array({{{"type","text"},{"text", text}}})}};
+        }
+    );
 
     // 网易版与国际版差异说明工具
     static const char* NETEASE_DIFF_TEXT =
