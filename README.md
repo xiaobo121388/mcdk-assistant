@@ -16,7 +16,11 @@
 				"search_all",
 				"search_api",
 				"search_enum",
-				"search_event"
+				"search_event",
+				"search_wiki",
+				"get_netease_diff",
+				"get_netease_jsonui",
+				"search_qumod"
 			],
 			"timeout": 30
 		}
