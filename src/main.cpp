@@ -119,7 +119,10 @@ int main() {
         "Wiki中涉及 Script API / @minecraft/server 的内容不适用于网易版，网易版应使用 mod.server.extraServerApi / mod.client.extraClientApi。\n"
         "\n"
         "[开发框架]\n"
-        "如果项目中存在 QuModLibs 库，优先使用 QuModLibs 的框架模块来简化网易Mod开发。";
+        "如果项目中存在 QuModLibs 库，优先使用 QuModLibs 的框架模块来简化网易Mod开发。\n"
+        "\n"
+        "[版本兼容性]\n"
+        "网易版本号通常比国际版慢几个版本，编写JSON时应尽可能使用兼容性最高的 format_version，避免使用国际版最新特性。";
 
     auto diff_tool = mcp::tool_builder("get_netease_diff")
         .with_description("获取网易版与国际版基岩版之间的差异说明")
