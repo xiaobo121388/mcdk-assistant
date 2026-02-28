@@ -132,7 +132,7 @@ private:
     void load_knowledge() {
         namespace fs = std::filesystem;
         if (!fs::exists(knowledge_dir_)) {
-            std::cerr << "[mcdk] knowledge dir not found: " << knowledge_dir_ << std::endl;
+            std::cerr << "[MCDK] knowledge dir not found: " << knowledge_dir_ << std::endl;
             return;
         }
 
@@ -145,7 +145,7 @@ private:
             load_markdown_file(entry.path(), rel_path);
         }
 
-        std::cout << "[mcdk] loaded " << doc_count() << " fragments from " << knowledge_dir_ << std::endl;
+        std::cout << "[MCDK] loaded " << doc_count() << " fragments from " << knowledge_dir_ << std::endl;
     }
 
     void load_markdown_file(const std::filesystem::path& abs_path, const std::string& rel_path) {
@@ -200,7 +200,7 @@ private:
                 tokenize(idx.fragments[i].content, idx.tokenized_docs[i]);
             }
             idx.engine.build_index(idx.fragments, idx.tokenized_docs);
-            std::cout << "[mcdk] " << name << " index: " << idx.fragments.size() << " docs" << std::endl;
+            std::cout << "[MCDK] " << name << " index: " << idx.fragments.size() << " docs" << std::endl;
         };
         build_one(api_index_,   "API");
         build_one(event_index_, "Event");

@@ -19,9 +19,10 @@ static std::string get_exe_dir() {
 
 static std::string resolve_path(const char* compile_time_path, const std::string& fallback_name) {
     namespace fs = std::filesystem;
+    // install 模式：优先使用 exe 同级目录
+    std::string local = get_exe_dir() + "/" + fallback_name;
+    if (fs::exists(local)) return local;
     if (fs::exists(compile_time_path)) return compile_time_path;
-    std::string alt = get_exe_dir() + "/" + fallback_name;
-    if (fs::exists(alt)) return alt;
     return compile_time_path;
 }
 
@@ -57,8 +58,8 @@ int main() {
     std::string dicts_dir     = resolve_path(MCDK_DICTS_DIR, "dicts");
     std::string knowledge_dir = resolve_path(MCDK_KNOWLEDGE_DIR, "knowledge");
 
-    std::cout << "[mcdk] dicts: " << dicts_dir << std::endl;
-    std::cout << "[mcdk] knowledge: " << knowledge_dir << std::endl;
+    std::cout << "[MCDK] dicts: " << dicts_dir << std::endl;
+    std::cout << "[MCDK] knowledge: " << knowledge_dir << std::endl;
 
     mcdk::SearchService search_svc(dicts_dir, knowledge_dir);
 
@@ -100,8 +101,8 @@ int main() {
         );
     }
 
-    std::cout << "[mcdk] MCP server starting on " << conf.host << ":" << conf.port << std::endl;
-    std::cout << "[mcdk] docs indexed: " << search_svc.doc_count() << std::endl;
+    std::cout << "[MCDK] MCP server starting on " << conf.host << ":" << conf.port << std::endl;
+    std::cout << "[MCDK] docs indexed: " << search_svc.doc_count() << std::endl;
 
     srv.start(true);
 
