@@ -59,6 +59,22 @@ public:
         }
     }
 
+    // 直接恢复已有的倒排索引，跳过重新计算
+    void restore_index(const std::vector<DocFragment>& fragments,
+                       const std::vector<std::vector<std::string>>& tokenized_docs,
+                       std::vector<int>&& doc_lengths,
+                       double avg_dl,
+                       std::unordered_map<std::string, double>&& idf,
+                       std::unordered_map<std::string, std::vector<size_t>>&& inverted_index) {
+        fragments_ = &fragments;
+        doc_tokens_ = &tokenized_docs;
+        num_docs_ = fragments.size();
+        doc_lengths_ = std::move(doc_lengths);
+        avg_dl_ = avg_dl;
+        idf_ = std::move(idf);
+        inverted_index_ = std::move(inverted_index);
+    }
+
     std::vector<SearchResult> search(const std::vector<std::string>& query_tokens,
                                      int top_k = -1) const {
         if (!fragments_ || num_docs_ == 0) return {};
@@ -105,6 +121,12 @@ public:
     }
 
     size_t doc_count() const { return num_docs_; }
+
+    // 用于序列化访问
+    const std::vector<int>& doc_lengths() const { return doc_lengths_; }
+    double avg_dl() const { return avg_dl_; }
+    const std::unordered_map<std::string, double>& idf() const { return idf_; }
+    const std::unordered_map<std::string, std::vector<size_t>>& inverted_index() const { return inverted_index_; }
 
 private:
     const std::vector<DocFragment>*              fragments_ = nullptr;

@@ -1,4 +1,5 @@
 #include "search/search_service.h"
+#include "search/index_cache.h"
 #include <mcp_server.h>
 #include <mcp_tool.h>
 #include <mcp_message.h>
@@ -56,18 +57,20 @@ int main() {
     std::string exe_dir = get_exe_dir();
     std::string dicts_dir     = exe_dir + "/dicts";
     std::string knowledge_dir = exe_dir + "/knowledge";
+    std::string cache_path    = exe_dir + "/mcdk_index_cache.bin";
 
     std::cout << "[MCDK] dicts: " << dicts_dir << std::endl;
     std::cout << "[MCDK] knowledge: " << knowledge_dir << std::endl;
+    std::cout << "[MCDK] cache: " << cache_path << std::endl;
     std::cout << "[MCDK] 正在初始化知识库索引，请稍候..." << std::endl;
 
-    mcdk::SearchService search_svc(dicts_dir, knowledge_dir);
+    mcdk::SearchService search_svc(dicts_dir, knowledge_dir, cache_path);
 
     mcp::server::configuration conf;
     conf.host    = "127.0.0.1";
     conf.port    = 18766;
     conf.name    = "mcdk-assistant";
-    conf.version = "0.1.0";
+    conf.version = "0.2.0";
 
     mcp::server srv(conf);
 
