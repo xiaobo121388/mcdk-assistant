@@ -22,7 +22,8 @@
 				"get_netease_jsonui",
 				"search_qumod",
 				"list_knowledge",
-				"read_knowledge"
+				"read_knowledge",
+				"search_netease_guide",
 			],
 			"timeout": 30
 		}
