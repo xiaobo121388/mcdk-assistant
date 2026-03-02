@@ -13,7 +13,7 @@
 namespace mcdk {
 
 // 文档分类（基于 ModAPI/ 下的子目录）
-enum class DocCategory { Unknown, API, Event, Enum, Beta, Wiki, QuMod };
+enum class DocCategory { Unknown, API, Event, Enum, Beta, Wiki, QuMod, NeteaseGuide };
 
 class SearchService {
 public:
@@ -44,16 +44,22 @@ public:
         return search_category(enum_index_, keyword, top_k);
     }
 
+    std::vector<SearchResult> search_netease_guide(const std::string& keyword, int top_k = -1) const {
+        return search_category(netease_guide_index_, keyword, top_k);
+    }
+
     std::vector<SearchResult> search_all(const std::string& keyword, int top_k = -1) const {
         auto a = search_category(api_index_, keyword, -1);
         auto b = search_category(event_index_, keyword, -1);
         auto c = search_category(enum_index_, keyword, -1);
         auto d = search_category_en(wiki_index_, keyword, -1);
         auto e = search_category(qumod_index_, keyword, -1);
+        auto f = search_category(netease_guide_index_, keyword, -1);
         a.insert(a.end(), b.begin(), b.end());
         a.insert(a.end(), c.begin(), c.end());
         a.insert(a.end(), d.begin(), d.end());
         a.insert(a.end(), e.begin(), e.end());
+        a.insert(a.end(), f.begin(), f.end());
         std::sort(a.begin(), a.end(), [](const SearchResult& x, const SearchResult& y) {
             return x.score > y.score;
         });
@@ -72,7 +78,7 @@ public:
     size_t doc_count() const {
         return api_index_.engine.doc_count() + event_index_.engine.doc_count()
              + enum_index_.engine.doc_count() + wiki_index_.engine.doc_count()
-             + qumod_index_.engine.doc_count();
+             + qumod_index_.engine.doc_count() + netease_guide_index_.engine.doc_count();
     }
 
 private:
@@ -90,6 +96,7 @@ private:
     CategoryIndex                  enum_index_;
     CategoryIndex                  wiki_index_;
     CategoryIndex                  qumod_index_;
+    CategoryIndex                  netease_guide_index_;
 
     std::vector<SearchResult> search_category(const CategoryIndex& idx, const std::string& keyword, int top_k) const {
         std::vector<std::string> query_tokens;
@@ -104,6 +111,8 @@ private:
     }
 
     static DocCategory classify_path(const std::string& rel_path) {
+        if (rel_path.find("NeteaseGuide/") == 0 || rel_path.find("/NeteaseGuide/") != std::string::npos)
+            return DocCategory::NeteaseGuide;
         if (rel_path.find("QuModDocs/") == 0 || rel_path.find("/QuModDocs/") != std::string::npos)
             return DocCategory::QuMod;
         if (rel_path.find("BedrockWiki/") == 0 || rel_path.find("/BedrockWiki/") != std::string::npos)
@@ -122,12 +131,13 @@ private:
     // 返回 nullptr 表示该分类不纳入索引
     CategoryIndex* index_for(DocCategory cat) {
         switch (cat) {
-        case DocCategory::API:   return &api_index_;
-        case DocCategory::Event: return &event_index_;
-        case DocCategory::Enum:  return &enum_index_;
-        case DocCategory::Wiki:  return &wiki_index_;
-        case DocCategory::QuMod: return &qumod_index_;
-        default:                 return nullptr;
+        case DocCategory::API:          return &api_index_;
+        case DocCategory::Event:        return &event_index_;
+        case DocCategory::Enum:         return &enum_index_;
+        case DocCategory::Wiki:         return &wiki_index_;
+        case DocCategory::QuMod:        return &qumod_index_;
+        case DocCategory::NeteaseGuide: return &netease_guide_index_;
+        default:                        return nullptr;
         }
     }
 
@@ -253,11 +263,12 @@ private:
             idx.engine.build_index(idx.fragments, idx.tokenized_docs);
             std::cout << "[MCDK] " << name << " index: " << idx.fragments.size() << " docs" << std::endl;
         };
-        build_cn(api_index_,   "API");
-        build_cn(event_index_, "Event");
-        build_cn(enum_index_,  "Enum");
-        build_en(wiki_index_,  "Wiki");
-        build_cn(qumod_index_, "QuMod");
+        build_cn(api_index_,            "API");
+        build_cn(event_index_,          "Event");
+        build_cn(enum_index_,           "Enum");
+        build_en(wiki_index_,           "Wiki");
+        build_cn(qumod_index_,          "QuMod");
+        build_cn(netease_guide_index_,  "NeteaseGuide");
     }
 };
 

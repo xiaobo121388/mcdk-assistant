@@ -77,12 +77,13 @@ int main() {
         SearchFn    fn;
     };
     ToolDef tools[] = {
-        {"search_api",   "搜索 ModAPI 接口文档", &mcdk::SearchService::search_api},
-        {"search_event", "搜索 ModAPI 事件文档", &mcdk::SearchService::search_event},
-        {"search_enum",  "搜索 ModAPI 枚举值文档", &mcdk::SearchService::search_enum},
-        {"search_all",   "搜索全部 ModAPI 文档（接口+事件+枚举值）", &mcdk::SearchService::search_all},
-        {"search_wiki",  "Search Bedrock Wiki documentation (English keywords)", &mcdk::SearchService::search_wiki},
-        {"search_qumod", "搜索 QuModLibs 框架库文档（QuMod是网易流行的热门框架库，当用户使用QuMod开发时应优先查找此处功能/设计规范），注意：文档本身并不全面，当用户项目中存在QuModLibs包时还应直接分析其源代码", &mcdk::SearchService::search_qumod},
+        {"search_api",           "搜索 ModAPI 接口文档", &mcdk::SearchService::search_api},
+        {"search_event",         "搜索 ModAPI 事件文档", &mcdk::SearchService::search_event},
+        {"search_enum",          "搜索 ModAPI 枚举值文档", &mcdk::SearchService::search_enum},
+        {"search_all",           "搜索全部 ModAPI 文档（接口+事件+枚举值）", &mcdk::SearchService::search_all},
+        {"search_wiki",          "Search Bedrock Wiki documentation (English keywords)", &mcdk::SearchService::search_wiki},
+        {"search_qumod",         "搜索 QuModLibs 框架库文档（QuMod是网易流行的热门框架库，当用户使用QuMod开发时应优先查找此处功能/设计规范），注意：文档本身并不全面，当用户项目中存在QuModLibs包时还应直接分析其源代码", &mcdk::SearchService::search_qumod},
+        {"search_netease_guide", "搜索网易MC独占的教学资料内容（不包含国际版通用内容）", &mcdk::SearchService::search_netease_guide},
     };
 
     for (auto& td : tools) {
