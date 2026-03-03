@@ -24,6 +24,10 @@
 				"list_knowledge",
 				"read_knowledge",
 				"search_netease_guide",
+				"search_game_assets",
+				"get_jsonui_reference",
+				"diagnose_ui",
+				"generate_ui_fullstack"
 			],
 			"timeout": 30
 		}
