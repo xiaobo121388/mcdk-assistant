@@ -237,16 +237,19 @@ static const char* JSONUI_REFERENCE_TEXT = R"(
     3. diagnose_ui(file_path) — 全面检查文件问题
        检查项：namespace缺失、controls key重复、type有效性、size格式、
               anchor_from/to成对、binding_name格式、@引用存在性
+    4. search_ui_content(file_path, keyword) — 按属性 key/value 内容搜索
+       适合快速查找纹理路径(textures/xxx)、绑定名(#xxx)、继承引用(@xxx)
+       返回匹配的 [控件路径] key: value，轻量精确
   以上工具均支持 file_path 参数（传文件绝对路径），大文件无需传入完整内容。
 
   【修改】对大型 UI 文件使用增量修改，避免重写整个文件：
-    4. patch_ui_file(file_path, patches) — 精确修改指定控件，不影响其他部分
+    5. patch_ui_file(file_path, patches) — 精确修改指定控件，不影响其他部分
        支持操作: set_prop(设置属性), remove_prop(删除属性),
                  add_ctrl(添加控件), remove_ctrl(删除控件), replace_ctrl(替换控件),
                  merge_ctrl(合并属性到子控件，保留子控件树，可选new_key修改继承),
                  add_top(添加顶层), remove_top(删除顶层)
        原子执行（失败则不写入）
-  典型工作流: dump_ui_tree(search) → patch_ui_file → diagnose_ui
+  典型工作流: dump_ui_tree(search) / search_ui_content → patch_ui_file → diagnose_ui
 
 十一、参考文档
   本速查手册仅为快速参考，完整控件属性、高级用法请查阅网易官方UI说明文档。
@@ -727,6 +730,105 @@ inline void register_jsonui_tools(mcp::server& srv) {
         ctx.output += stats;
 
         return {{"content", mcp::json::array({{{"type","text"},{"text", ctx.output}}})}};
+    });
+
+    // ── search_ui_content ─────────────────────────────
+    // 按属性 key/value 内容搜索 JSON UI 文件，返回匹配的属性+所在控件路径
+    auto search_content_tool = mcp::tool_builder("search_ui_content")
+        .with_description(
+            "搜索 JSON UI 文件中的属性内容（key+value），按关键词/正则匹配。"
+            "适合快速查找纹理路径(textures/xxx)、绑定名(#xxx)、继承引用(@xxx)等。"
+            "返回匹配的属性 key: value + 所在控件路径，轻量精确")
+        .with_string_param("file_path", "JSON UI 文件绝对路径（与 json_content 二选一，大文件推荐）", false)
+        .with_string_param("json_content", "JSON UI 文件的完整文本内容（与 file_path 二选一）", false)
+        .with_string_param("keyword", "搜索关键词或正则表达式", true)
+        .build();
+
+    srv.register_tool(search_content_tool, [](const mcp::json& params, const std::string&) -> mcp::json {
+        std::string content = resolve_json_content(params);
+        nlohmann::json root;
+        try {
+            root = nlohmann::json::parse(content, nullptr, true, true);
+        } catch (const nlohmann::json::parse_error& e) {
+            throw mcp::mcp_exception(mcp::error_code::invalid_params,
+                std::string("JSON 解析失败: ") + e.what());
+        }
+
+        std::string keyword = params.value("keyword", "");
+        if (keyword.empty())
+            throw mcp::mcp_exception(mcp::error_code::invalid_params, "keyword 不能为空");
+
+        // 尝试编译正则
+        std::regex re;
+        bool use_regex = true;
+        try { re = std::regex(keyword, std::regex::icase); }
+        catch (...) { use_regex = false; }
+
+        struct Match {
+            std::string path;    // 控件路径
+            std::string key;     // 属性 key
+            std::string value;   // 属性 value 序列化
+        };
+        std::vector<Match> matches;
+
+        // 递归搜索 lambda
+        std::function<void(const nlohmann::json&, const std::string&)> search_node;
+        search_node = [&](const nlohmann::json& node, const std::string& path) {
+            if (!node.is_object()) return;
+            // 检查当前控件的每个属性
+            for (auto it = node.begin(); it != node.end(); ++it) {
+                if (it.key() == "controls") continue; // 跳过子控件数组
+                std::string k = it.key();
+                std::string v = it.value().dump();
+                bool hit = false;
+                if (use_regex) {
+                    try {
+                        hit = std::regex_search(k, re) || std::regex_search(v, re);
+                    } catch (...) {
+                        hit = (k.find(keyword) != std::string::npos ||
+                               v.find(keyword) != std::string::npos);
+                    }
+                } else {
+                    hit = (k.find(keyword) != std::string::npos ||
+                           v.find(keyword) != std::string::npos);
+                }
+                if (hit) {
+                    if (v.size() > 200) v = v.substr(0, 197) + "...";
+                    matches.push_back({path, k, v});
+                }
+            }
+            // 递归子控件
+            if (node.contains("controls") && node["controls"].is_array()) {
+                for (const auto& child : node["controls"]) {
+                    if (!child.is_object()) continue;
+                    for (auto ct = child.begin(); ct != child.end(); ++ct) {
+                        search_node(ct.value(), path + "/" + ct.key());
+                    }
+                }
+            }
+        };
+
+        // 遍历顶层控件
+        for (auto it = root.begin(); it != root.end(); ++it) {
+            if (it.key() == "namespace") continue;
+            search_node(it.value(), it.key());
+        }
+
+        // 格式化输出
+        std::string output;
+        std::string ns = root.value("namespace", "");
+        if (!ns.empty()) output += "namespace: " + ns + "\n";
+
+        if (matches.empty()) {
+            output += "未找到匹配 \"" + keyword + "\" 的属性\n";
+        } else {
+            for (const auto& m : matches) {
+                output += "[" + m.path + "] " + m.key + ": " + m.value + "\n";
+            }
+            output += "--- 共 " + std::to_string(matches.size()) + " 条匹配 ---\n";
+        }
+
+        return {{"content", mcp::json::array({{{"type","text"},{"text", output}}})}};
     });
 
     // ── patch_ui_file ─────────────────────────────────

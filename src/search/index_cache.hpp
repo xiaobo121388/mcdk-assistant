@@ -13,15 +13,15 @@
 
 namespace mcdk {
 
-// 索引缓存文件格式 (v4):
-// [magic: 8B] [version: 4B] [total_size: 8B] [fingerprint] [data...]
-// GameAssets: entries 只存 rel_path，content 直接从 fragments 引用（消除双份存储）
-// 整块读入内存后用指针解析（零额外拷贝的关键字段）
+// 索引缓存文件格式 (v5):
+// [magic: 8B] [version: 4B] [fingerprint] [data...]
+// v5: 倒排表存储 (doc_id, tf) 对而非仅 doc_id，搜索时 O(1) 取 TF
+// GameAssets: entries 只存 rel_path，content 直接从 fragments 引用
 
 class IndexCache {
 public:
     static constexpr char     MAGIC[8] = {'M','C','D','K','I','D','X','\0'};
-    static constexpr uint32_t VERSION  = 4;
+    static constexpr uint32_t VERSION  = 5;
 
     // ── Fingerprint：只读几个子目录的 mtime，< 1ms ──
     static std::string compute_fingerprint(const std::string& knowledge_dir) {
@@ -48,10 +48,10 @@ public:
 
     // ── 数据结构 ──
     struct BM25State {
-        std::vector<int>                                     doc_lengths;
-        double                                               avg_dl = 0.0;
-        std::unordered_map<std::string, double>              idf;
-        std::unordered_map<std::string, std::vector<size_t>> inverted_index;
+        std::vector<int>                                                doc_lengths;
+        double                                                         avg_dl = 0.0;
+        std::unordered_map<std::string, double>                        idf;
+        std::unordered_map<std::string, std::vector<BM25Engine::Posting>> inverted_index;
     };
 
     struct CatData {
@@ -259,10 +259,13 @@ private:
 
         const auto& inv = e.inverted_index();
         append_u32(buf, static_cast<uint32_t>(inv.size()));
-        for (const auto& [term, ids] : inv) {
+        for (const auto& [term, postings] : inv) {
             append_string(buf, term);
-            append_u32(buf, static_cast<uint32_t>(ids.size()));
-            for (size_t id : ids) append_u64(buf, static_cast<uint64_t>(id));
+            append_u32(buf, static_cast<uint32_t>(postings.size()));
+            for (const auto& posting : postings) {
+                append_u64(buf, static_cast<uint64_t>(posting.doc_id));
+                append_u32(buf, static_cast<uint32_t>(posting.tf));
+            }
         }
     }
 
@@ -329,11 +332,13 @@ private:
         s.inverted_index.reserve(inv_n);
         for (uint32_t i = 0; i < inv_n; ++i) {
             std::string term = read_string(p, end);
-            uint32_t id_n = read_u32(p, end);
-            std::vector<size_t> ids(id_n);
-            for (uint32_t j = 0; j < id_n; ++j)
-                ids[j] = static_cast<size_t>(read_u64(p, end));
-            s.inverted_index[std::move(term)] = std::move(ids);
+            uint32_t post_n = read_u32(p, end);
+            std::vector<BM25Engine::Posting> postings(post_n);
+            for (uint32_t j = 0; j < post_n; ++j) {
+                postings[j].doc_id = static_cast<size_t>(read_u64(p, end));
+                postings[j].tf     = static_cast<int>(read_u32(p, end));
+            }
+            s.inverted_index[std::move(term)] = std::move(postings);
         }
     }
 };

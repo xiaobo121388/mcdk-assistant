@@ -25,6 +25,12 @@ public:
     static constexpr double K1 = 1.5;
     static constexpr double B  = 0.75;
 
+    // 倒排表条目：doc_id + 预计算的 TF
+    struct Posting {
+        size_t doc_id;
+        int    tf;
+    };
+
     void build_index(const std::vector<DocFragment>& fragments,
                      const std::vector<std::vector<std::string>>& tokenized_docs) {
         fragments_ = &fragments;
@@ -43,18 +49,22 @@ public:
 
         idf_.clear();
         inverted_index_.clear();
+
+        // 构建倒排索引，同时统计 TF
         for (size_t i = 0; i < n; ++i) {
-            std::unordered_map<std::string, bool> seen;
+            // 统计当前文档中每个 token 的频率
+            std::unordered_map<std::string, int> tf_map;
             for (const auto& token : tokenized_docs[i]) {
-                if (!seen[token]) {
-                    seen[token] = true;
-                    inverted_index_[token].push_back(i);
-                }
+                ++tf_map[token];
+            }
+            // 写入倒排表
+            for (const auto& [term, tf] : tf_map) {
+                inverted_index_[term].push_back({i, tf});
             }
         }
 
-        for (const auto& [term, doc_ids] : inverted_index_) {
-            double df = static_cast<double>(doc_ids.size());
+        for (const auto& [term, postings] : inverted_index_) {
+            double df = static_cast<double>(postings.size());
             idf_[term] = std::log((num_docs_ - df + 0.5) / (df + 0.5) + 1.0);
         }
     }
@@ -65,7 +75,7 @@ public:
                        std::vector<int>&& doc_lengths,
                        double avg_dl,
                        std::unordered_map<std::string, double>&& idf,
-                       std::unordered_map<std::string, std::vector<size_t>>&& inverted_index) {
+                       std::unordered_map<std::string, std::vector<Posting>>&& inverted_index) {
         fragments_ = &fragments;
         doc_tokens_ = &tokenized_docs;
         num_docs_ = fragments.size();
@@ -89,15 +99,12 @@ public:
             auto idx_it = inverted_index_.find(qt);
             if (idx_it == inverted_index_.end()) continue;
 
-            for (size_t doc_id : idx_it->second) {
-                int tf = 0;
-                for (const auto& t : (*doc_tokens_)[doc_id]) {
-                    if (t == qt) ++tf;
-                }
-                double dl = static_cast<double>(doc_lengths_[doc_id]);
-                double tf_norm = (static_cast<double>(tf) * (K1 + 1.0))
-                    / (static_cast<double>(tf) + K1 * (1.0 - B + B * dl / avg_dl_));
-                scores[doc_id] += idf_val * tf_norm;
+            for (const auto& posting : idx_it->second) {
+                double dl = static_cast<double>(doc_lengths_[posting.doc_id]);
+                double tf = static_cast<double>(posting.tf);
+                double tf_norm = (tf * (K1 + 1.0))
+                    / (tf + K1 * (1.0 - B + B * dl / avg_dl_));
+                scores[posting.doc_id] += idf_val * tf_norm;
             }
         }
 
@@ -126,7 +133,7 @@ public:
     const std::vector<int>& doc_lengths() const { return doc_lengths_; }
     double avg_dl() const { return avg_dl_; }
     const std::unordered_map<std::string, double>& idf() const { return idf_; }
-    const std::unordered_map<std::string, std::vector<size_t>>& inverted_index() const { return inverted_index_; }
+    const std::unordered_map<std::string, std::vector<Posting>>& inverted_index() const { return inverted_index_; }
 
 private:
     const std::vector<DocFragment>*              fragments_ = nullptr;
@@ -135,7 +142,7 @@ private:
     double                                       avg_dl_ = 0;
     size_t                                       num_docs_ = 0;
     std::unordered_map<std::string, double>                idf_;
-    std::unordered_map<std::string, std::vector<size_t>>   inverted_index_;
+    std::unordered_map<std::string, std::vector<Posting>>  inverted_index_;
 };
 
 } // namespace mcdk
