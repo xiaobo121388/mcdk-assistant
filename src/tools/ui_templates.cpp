@@ -33,7 +33,8 @@ static UiTemplateResult gen_screen_basic(const std::string& ns, const std::strin
 
     std::string json = R"({
   "namespace": ")" + ns + R"(",
-  "main@netease_editor_template_namespace.netease_editor_root_panel": {
+  "main": {
+    "type": "panel", "size": ["100%", "100%"],
     "controls": [
       { "bg": { "type": "image", "size": ["100%", "100%"], "texture": "textures/ui/bg32", "alpha": 0.6, "layer": 0 } },
       {
@@ -116,7 +117,8 @@ static UiTemplateResult gen_screen_list(const std::string& ns, const std::string
         "bindings": [{ "binding_name": "#item_text" }] } }
     ]
   },
-  "main@netease_editor_template_namespace.netease_editor_root_panel": {
+  "main": {
+    "type": "panel", "size": ["100%", "100%"],
     "controls": [
       { "bg": { "type": "image", "size": ["100%", "100%"], "texture": "textures/ui/bg32", "alpha": 0.6, "layer": 0 } },
       {
@@ -179,7 +181,8 @@ static UiTemplateResult gen_screen_grid(const std::string& ns, const std::string
       { "icon": { "type": "image", "size": ["100%", "100%"], "texture": "textures/ui/cell_image_normal" } }
     ]
   },
-  "main@netease_editor_template_namespace.netease_editor_root_panel": {
+  "main": {
+    "type": "panel", "size": ["100%", "100%"],
     "controls": [
       { "bg": { "type": "image", "size": ["100%", "100%"], "texture": "textures/ui/bg32", "alpha": 0.6, "layer": 0 } },
       {
@@ -228,7 +231,8 @@ static UiTemplateResult gen_screen_form(const std::string& ns, const std::string
 
     std::string json = R"({
   "namespace": ")" + ns + R"(",
-  "main@netease_editor_template_namespace.netease_editor_root_panel": {
+  "main": {
+    "type": "panel", "size": ["100%", "100%"],
     "controls": [
       { "bg": { "type": "image", "size": ["100%", "100%"], "texture": "textures/ui/bg32", "alpha": 0.6, "layer": 0 } },
       {
@@ -308,7 +312,8 @@ static UiTemplateResult gen_screen_tabbed(const std::string& ns, const std::stri
   "namespace": ")" + ns + R"(",
   "tab_content_0": { "type": "panel", "size": ["100%", "100%"] },
   "tab_content_1": { "type": "panel", "size": ["100%", "100%"], "visible": false },
-  "main@netease_editor_template_namespace.netease_editor_root_panel": {
+  "main": {
+    "type": "panel", "size": ["100%", "100%"],
     "controls": [
       { "bg": { "type": "image", "size": ["100%", "100%"], "texture": "textures/ui/bg32", "alpha": 0.6, "layer": 0 } },
       {
@@ -398,7 +403,8 @@ static UiTemplateResult gen_hud_overlay(const std::string& ns, const std::string
 
     std::string json = R"({
   "namespace": ")" + ns + R"(",
-  "main@netease_editor_template_namespace.netease_editor_root_panel": {
+  "main": {
+    "type": "panel", "size": ["100%", "100%"],
     "is_modal": false,
     "should_steal_mouse": false,
     "absorbs_input": false,
