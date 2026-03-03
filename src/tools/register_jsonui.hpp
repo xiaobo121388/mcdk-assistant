@@ -54,11 +54,12 @@ static const char* JSONUI_REFERENCE_TEXT = R"(
   toggle    — 开关控件，含 checked/unchecked 两态
 
 二、布局系统
-  size: ["100%", "100%"] | ["200px", "50%"] | ["100%+10px", "100%cm"] | [固定数字, 固定数字] | ["fill", 30]
+  size: ["100%", "100%"] | ["200px", "50%"] | ["100%+10px", "100%cm"] | [固定数字, 固定数字] | ["fill", 30] | ["default", "default"]
     - "100%"    = 父控件的100%
     - "100%+10px" = 父控件100% + 10像素（无空格！）
     - "100%cm"  = 100% of child max（子控件最大值）
     - "fill"    = 填充 stack_panel 剩余空间
+    - "default" = 上下文自适应：普通控件=100%，label=文字大小，grid元素=按网格分配
     - 数字      = 固定像素值
   anchor_from / anchor_to: 九宫格定位
     top_left | top_middle | top_right
@@ -82,8 +83,8 @@ static const char* JSONUI_REFERENCE_TEXT = R"(
     - 内部子控件: 百分比 + 少量像素修正 ["100%+0px", "7%+0px"]
     - 避免纯固定像素(如 [200, 100])，不同分辨率下不适配
     - offset 同理用百分比: ["0%+0px", "2%+0px"]
-    - "auto" 是特殊大小值：普通控件=100%（等价父容器）；文本控件(label)=自适应文字内容大小；
-      grid 元素=自适应网格布局分配大小（如 2x3 网格自动算每格宽高）。grid 的子元素推荐用 "auto"
+    - "default" 是特殊大小值：普通控件=100%（等价父容器）；文本控件(label)=自适应文字内容大小；
+      grid 元素=自适应网格布局分配大小（如 2x3 网格自动算每格宽高）。grid 元素推荐用 "default"
 
   【图层(layer)规则】
     - layer 越大越靠前（覆盖在上面）
@@ -107,8 +108,8 @@ static const char* JSONUI_REFERENCE_TEXT = R"(
 
   【grid 布局注意】
     - 避免父子控件互相依赖大小。竖向信息流常用：grid x="100%" y="100%cm"（自动延伸）
-    - 元素控件 size 推荐 ["auto","auto"]，grid 会根据列数/行数自动分配每格宽高
-      例: 2x3 网格中 auto 会自动算出每格=父宽50% × 父高33%
+    - 元素控件 size 推荐 ["default","default"]，grid 会根据列数/行数自动分配每格宽高
+      例: 2x3 网格中 "default" 会自动算出每格=父宽50% × 父高33%
     - 技巧：元素控件外套一层 panel，内容 size=["90%","90%"] 留间隙，避免网格填满无空隙不美观
 
   【通用原则】
