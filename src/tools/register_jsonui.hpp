@@ -112,18 +112,19 @@ static const char* JSONUI_REFERENCE_TEXT = R"(
     $scrolling_content_anchor_from / $scrolling_content_anchor_to
 
 八、画布（main）设计原则
-  【默认】直接用 panel 类型，不继承任何基类，控件路径最短：
-    "main": { "type": "panel", "size": ["100%","100%"], ... }
+  【默认】顶层画布 main 的 type 必须为 "screen"（不是 panel），不继承任何基类，控件路径最短：
+    "main": { "type": "screen", "size": ["100%","100%"], ... }
   【仅在需要安全区适配时】继承网易基类画布（会拉长控件路径）：
     "main@netease_editor_template_namespace.netease_editor_root_panel": { ... }
   安全区场景：需要适配刘海屏/全面屏时。普通界面无需继承，路径长了反而增加代码量。
+  注意：只有 main（顶层画布）用 "screen"，内部子容器仍用 "panel"。
 
 九、最小可用完整示例
   JSON UI 文件 (ui/my_screen.json):
     {
       "namespace": "MY_UI",
       "main": {
-        "type": "panel",
+        "type": "screen",
         "size": ["100%", "100%"],
         "controls": [
           { "bg": { "type": "image", "size": ["100%","100%"], "texture": "textures/ui/bg32", "alpha": 0.6 } },
