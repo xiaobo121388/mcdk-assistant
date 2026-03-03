@@ -773,26 +773,33 @@ inline void register_jsonui_tools(mcp::server& srv) {
 
         // 递归搜索 lambda
         std::function<void(const nlohmann::json&, const std::string&)> search_node;
+        // 匹配辅助 lambda
+        auto match_str = [&](const std::string& s) -> bool {
+            if (use_regex) {
+                try { return std::regex_search(s, re); }
+                catch (...) { return s.find(keyword) != std::string::npos; }
+            }
+            return s.find(keyword) != std::string::npos;
+        };
+
         search_node = [&](const nlohmann::json& node, const std::string& path) {
             if (!node.is_object()) return;
+
+            // 检查控件 key 名（路径最后一段，含 @继承 信息）
+            {
+                auto slash = path.rfind('/');
+                std::string ctrl_key = (slash != std::string::npos) ? path.substr(slash + 1) : path;
+                if (match_str(ctrl_key)) {
+                    matches.push_back({path, "(控件名)", ctrl_key});
+                }
+            }
+
             // 检查当前控件的每个属性
             for (auto it = node.begin(); it != node.end(); ++it) {
                 if (it.key() == "controls") continue; // 跳过子控件数组
                 std::string k = it.key();
                 std::string v = it.value().dump();
-                bool hit = false;
-                if (use_regex) {
-                    try {
-                        hit = std::regex_search(k, re) || std::regex_search(v, re);
-                    } catch (...) {
-                        hit = (k.find(keyword) != std::string::npos ||
-                               v.find(keyword) != std::string::npos);
-                    }
-                } else {
-                    hit = (k.find(keyword) != std::string::npos ||
-                           v.find(keyword) != std::string::npos);
-                }
-                if (hit) {
+                if (match_str(k) || match_str(v)) {
                     if (v.size() > 200) v = v.substr(0, 197) + "...";
                     matches.push_back({path, k, v});
                 }
