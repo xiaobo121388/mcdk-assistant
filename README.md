@@ -27,7 +27,25 @@
 				"search_game_assets",
 				"get_jsonui_reference",
 				"diagnose_ui",
-				"generate_ui_fullstack"
+				"generate_ui_fullstack",
+				"draw_pixels_batch",
+				"canvas_new",
+				"canvas_preview",
+				"apply_outline",
+				"canvas_save",
+				"apply_dithering",
+				"apply_palette_quantize",
+				"apply_shadow",
+				"canvas_info",
+				"canvas_load",
+				"draw_line",
+				"draw_pixel",
+				"draw_circle",
+				"draw_rect",
+				"extract_palette",
+				"fill_flood",
+				"fill_gradient",
+				"fill_rect"
 			],
 			"timeout": 30
 		}
