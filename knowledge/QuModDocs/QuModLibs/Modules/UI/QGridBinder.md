@@ -298,11 +298,7 @@ class MyUI(ScreenNodeWrapper):
         ScreenNodeWrapper.Create(self)
         # 在 Create 中创建并启动（手动管理）
         self.gridBinder = QGridBinder(self).setGridData(
-            QGridData(
-                "/panel/grid",
-                bindFunc=self.onGridRender,
-                bindUpdateFinishFunc=self.onRenderFinish
-            )
+            QGridData("/panel/grid", bindFunc=self.onGridRender)
         ).start()  # 手动启动
         self.refreshData()
 
@@ -312,10 +308,6 @@ class MyUI(ScreenNodeWrapper):
             self.GetBaseUIControl(viewPath + "/name").asLabel().SetText(
                 self.itemList[index]
             )
-
-    def onRenderFinish(self):
-        """每轮渲染更新完成后执行"""
-        print("网格渲染完成，共 {} 项".format(len(self.itemList)))
 
     def refreshData(self):
         """刷新数据并触发重新渲染"""
@@ -372,26 +364,20 @@ class ScrollGridUI(ScreenNodeWrapper):
         self.gridBinder = QGridBinder(self, QGridData(
             "/panel/scrollView",        # 传入 ScrollView 的路径（而不是 Grid 的）
             isScrollGrid=True,          # 声明为滚动网格
-            bindFunc=self.onRender,
-            incrementalCallback=self.onFirstRender
+            bindFunc=self.onRender
         ))
-
-    def onFirstRender(self, viewPath, index):
-        # type: (str, int) -> None
-        """仅在格子首次渲染时调用（增量回调）"""
-        # 适合做按钮绑定等一次性初始化
-        buttonPath = viewPath + "/btn"
-        self.gridBinder.setButtonClickHandler(
-            buttonPath,
-            lambda: self.onItemClick(index)
-        )
 
     def onRender(self, viewPath, index):
         # type: (str, int) -> None
-        """每次更新都会调用"""
+        """每次更新都会调用 - 所有格子操作都在这里"""
         if index < len(self.dataList):
             self.GetBaseUIControl(viewPath + "/label").asLabel().SetText(
                 "第 {} 项".format(self.dataList[index])
+            )
+            # ⚠️ 按钮回调必须在 bindFunc 中每次都设置（复用机制）
+            self.gridBinder.setButtonClickHandler(
+                viewPath + "/btn",
+                lambda: self.onItemClick(index)
             )
 
     def onItemClick(self, index):
@@ -433,7 +419,9 @@ gridData.setGridPathBasedOnScrollView("/wrapper/grid")
 
 ## 增量渲染机制
 
-`QGridData` 内置增量渲染缓存，通过 `incrementalCallback` 实现只在格子首次出现时执行特定逻辑：
+`QGridData` 内置增量渲染缓存，通过 `incrementalCallback` 实现只在格子首次出现时执行特定逻辑（如入场动画）。
+
+> **💡 提示**：99% 的业务场景不需要 `incrementalCallback`，只用 `bindFunc` 即可完成所有网格开发需求。
 
 ```python
 # -*- coding: utf-8 -*-
@@ -447,30 +435,20 @@ class IncrementalUI(ScreenNodeWrapper):
         self.gridBinder = QGridBinder(self, QGridData(
             "/panel/grid",
             bindFunc=self.onRender,
-            incrementalCallback=self.onIncrementalRender,
-            bindUpdateBeforeFunc=self.onBeforeUpdate,
-            bindUpdateFinishFunc=self.onAfterUpdate
+            incrementalCallback=self.onIncrementalRender
         ))
-
-    def onBeforeUpdate(self):
-        """每轮更新开始前调用 - 准备数据"""
-        print("开始更新网格...")
 
     def onIncrementalRender(self, viewPath, index):
         # type: (str, int) -> None
-        """增量回调 - 仅首次渲染时触发"""
-        # 适合做一次性操作：绑定事件、创建子控件等
-        print("格子 {} 首次渲染".format(index))
+        """增量回调 - 仅首次渲染时触发（适合入场动画等纯展示逻辑）"""
+        # ⚠️ 不要在这里绑定按钮等交互事件（复用机制会导致 index 错乱）
+        print("格子 {} 首次渲染，可在此播放入场动画".format(index))
 
     def onRender(self, viewPath, index):
         # type: (str, int) -> None
         """完整回调 - 每次更新都触发"""
-        # 适合做数据刷新：更新文本、图片等
+        # 所有数据刷新和交互绑定都在这里完成
         pass
-
-    def onAfterUpdate(self):
-        """每轮更新结束后调用 - 后处理"""
-        print("网格更新完成")
 
     def resetAllGridItems(self):
         """重置所有格子 - 清除增量缓存后下次更新将全部重新触发 incrementalCallback"""
@@ -611,10 +589,7 @@ class BackpackUI(ScreenNodeWrapper):
         self.gridBinder = QGridBinder(self, QGridData(
             "/root/scroll_view",
             isScrollGrid=True,
-            bindFunc=self.renderItem,
-            incrementalCallback=self.initItem,
-            bindUpdateBeforeFunc=self.prepareRender,
-            bindUpdateFinishFunc=self.finishRender
+            bindFunc=self.renderItem
         ))
 
     def Create(self):
@@ -645,21 +620,9 @@ class BackpackUI(ScreenNodeWrapper):
 
     # ====== 渲染回调 ======
 
-    def prepareRender(self):
-        """前置处理 - 可在此准备缓存数据"""
-        pass
-
-    def initItem(self, viewPath, index):
-        # type: (str, int) -> None
-        """增量回调 - 首次渲染时绑定按钮"""
-        self.gridBinder.setButtonClickHandler(
-            viewPath + "/btn_item",
-            lambda: self.onItemClick(index)
-        )
-
     def renderItem(self, viewPath, index):
         # type: (str, int) -> None
-        """渲染回调 - 更新格子显示"""
+        """渲染回调 - 每次更新都会调用，所有格子操作都在这里完成"""
         # 注意：viewPath 根控件在回调期间被引擎接管，不能直接 SetVisible
         # 必须操作其内部子控件（如 content_panel）来控制可见性
         contentPanel = self.GetBaseUIControl(viewPath + "/content_panel")
@@ -679,15 +642,16 @@ class BackpackUI(ScreenNodeWrapper):
             iconControl = self.GetBaseUIControl(viewPath + "/content_panel/item_icon")
             if iconControl:
                 iconControl.asImage().SetSprite(item["icon"])
+            # ⚠️ 按钮回调必须在 bindFunc 中每次都重新设置（复用机制会破坏缓存）
+            self.gridBinder.setButtonClickHandler(
+                viewPath + "/content_panel/btn_item",
+                lambda: self.onItemClick(index)
+            )
         else:
             # 超出数据范围的多余格子 - 隐藏内容面板
             # ⚠️ 不能对 viewPath 本身 SetVisible，只能对子控件操作
             # ⚠️ 第二个参数 False 非常重要：避免每个格子都触发全局 UpdateScreen
             contentPanel.SetVisible(False, False)
-
-    def finishRender(self):
-        """后置处理"""
-        pass
 
     # ====== 交互回调 ======
 
