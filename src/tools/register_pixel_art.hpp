@@ -272,7 +272,7 @@ inline void register_pixel_art_tools(mcp::server& srv) {
     // apply_outline
     srv.register_tool(
         mcp::tool_builder("apply_outline")
-            .with_description("对所有非透明像素自动添加外描边（像素画物品必备）。默认1px黑色")
+            .with_description("对所有非透明像素自动添加外描边。默认1px黑色")
             .with_string_param("color","描边颜色，默认#000000FF",false)
             .with_number_param("thickness","描边厚度（像素），默认1",false).build(),
         [&canvas](const mcp::json& p, const std::string&) -> mcp::json {
