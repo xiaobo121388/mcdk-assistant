@@ -43,7 +43,7 @@ static const char* JSONUI_REFERENCE_TEXT = R"(
   image     — 图片控件，支持 texture/uv/uv_size/nineslice/clip
                JSON 侧 texture 路径不带扩展名: "textures/ui/my_icon"
   label     — 文本控件，支持 text/color/font_size/font_scale_factor/shadow
-              font_size 取值: "small" | "middle" | "large"，【默认大小推荐为 "middle"（size：1.0）而非 "small"】
+              font_size 取值: "small" | "normal" | "large" | "extra_large"，默认 "normal"（推荐不低于此值，避免小屏模糊）
               font_scale_factor: 浮点数缩放因子（基于 font_size 再缩放），默认 1.0
   button    — 按钮控件，含 default/hover/pressed 三态，通过 $pressed_button_name 触发回调
   stack_panel — 线性布局容器，orientation: "horizontal"|"vertical"，子控件自动排列

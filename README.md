@@ -45,7 +45,12 @@
 				"extract_palette",
 				"fill_flood",
 				"fill_gradient",
-				"fill_rect"
+				"fill_rect",
+				"replace_color",
+				"transform_flip",
+				"query_ui_control",
+				"patch_ui_file",
+				"dump_ui_tree"
 			],
 			"timeout": 30
 		}
