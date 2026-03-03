@@ -112,7 +112,7 @@ static const char* JSONUI_REFERENCE_TEXT = R"(
     $scrolling_content_anchor_from / $scrolling_content_anchor_to
 
 八、画布（main）设计原则
-  【默认】顶层画布 main 的 type 必须为 "screen"（不是 panel），不继承任何基类，控件路径最短：
+  【默认】顶层画布 main 的 type 必须为 "screen"（不是 panel，自定义控件除外），不继承任何基类，控件路径最短：
     "main": { "type": "screen", "size": ["100%","100%"], ... }
   【仅在需要安全区适配时】继承网易基类画布（会拉长控件路径）：
     "main@netease_editor_template_namespace.netease_editor_root_panel": { ... }
