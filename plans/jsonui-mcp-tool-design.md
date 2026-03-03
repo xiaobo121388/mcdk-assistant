@@ -178,7 +178,7 @@ class MyScreenNode(ScreenNode):
 
 ## 行号追踪库最终结论
 
-**问题**：JSON UI 文件含 `//` 注释，`nlohmann/json` 不支持注释且不追踪行号。
+**问题**：JSON UI 文件含 `//` 注释，`nlohmann/json` 支持注释但不追踪行号。
 
 **结论**：**当前不引入新库**，理由：
 

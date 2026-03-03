@@ -1,7 +1,7 @@
 #pragma once
 
-#include "search/bm25.h"
-#include "search/index_cache.h"
+#include "search/bm25.hpp"
+#include "search/index_cache.hpp"
 #include <cppjieba/Jieba.hpp>
 #include <string>
 #include <vector>

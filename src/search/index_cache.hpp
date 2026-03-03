@@ -1,6 +1,6 @@
 #pragma once
 
-#include "search/bm25.h"
+#include "search/bm25.hpp"
 #include <string>
 #include <vector>
 #include <fstream>
