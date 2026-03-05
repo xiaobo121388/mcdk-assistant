@@ -50,7 +50,15 @@
 				"transform_flip",
 				"query_ui_control",
 				"patch_ui_file",
-				"dump_ui_tree"
+				"dump_ui_tree",
+				"search_ui_content",
+				"model_parse",
+				"model_get_bone",
+				"model_op",
+				"model_create_from_template",
+				"get_animation_reference",
+				"animation_parse",
+				"animation_get_bone_channel"
 			],
 			"timeout": 30
 		}
