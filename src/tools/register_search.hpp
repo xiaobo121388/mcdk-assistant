@@ -21,7 +21,7 @@ inline mcp::json handle_search(SearchService& svc, SearchFn fn, const mcp::json&
     if (keyword.empty())
         throw mcp::mcp_exception(mcp::error_code::invalid_params, "keyword is required");
     int top_k = params.contains("top_k") && !params["top_k"].is_null()
-        ? params["top_k"].get<int>() : -1;
+        ? params["top_k"].get<int>() : 6;
 
     auto results = (svc.*fn)(keyword, top_k);
 
@@ -60,7 +60,7 @@ inline void register_search_tools(mcp::server& srv, SearchService& search_svc,
         auto tool = mcp::tool_builder(td.name)
             .with_description(td.desc)
             .with_string_param("keyword", "搜索关键词", true)
-            .with_number_param("top_k", "返回结果数量上限，默认返回全部", false)
+            .with_number_param("top_k", "返回结果数量上限，默认返回 6 个", false)
             .with_read_only_hint(true).with_idempotent_hint(true).build();
         auto fn = td.fn;
         srv.register_tool(tool,
@@ -77,7 +77,7 @@ inline void register_search_tools(mcp::server& srv, SearchService& search_svc,
                 "scope: 0=搜索全部资产, 1=仅搜索行为包(behavior_packs), 2=仅搜索资源包(resource_packs)")
             .with_string_param("keyword", "搜索关键词（支持文件名片段或文件内容关键词）", true)
             .with_number_param("scope",   "搜索范围：0=全部（默认），1=仅行为包，2=仅资源包", false)
-            .with_number_param("top_k",   "返回结果数量上限，默认返回全部匹配", false)
+            .with_number_param("top_k",   "返回结果数量上限，默认返回 6 个", false)
             .with_read_only_hint(true).with_idempotent_hint(true).build();
 
         srv.register_tool(tool,
@@ -88,7 +88,7 @@ inline void register_search_tools(mcp::server& srv, SearchService& search_svc,
                 int scope = params.contains("scope") && !params["scope"].is_null()
                     ? params["scope"].get<int>() : 0;
                 int top_k = params.contains("top_k") && !params["top_k"].is_null()
-                    ? params["top_k"].get<int>() : -1;
+                    ? params["top_k"].get<int>() : 6;
 
                 auto results = search_svc.search_game_assets(keyword, scope, top_k);
                 mcp::json arr = mcp::json::array();

@@ -89,7 +89,9 @@ public:
                                      int top_k = -1) const {
         if (!fragments_ || num_docs_ == 0) return {};
 
-        std::vector<double> scores(num_docs_, 0.0);
+        // 稀疏累积：只对命中文档累加得分，避免全量数组初始化+遍历
+        std::unordered_map<size_t, double> score_map;
+        score_map.reserve(std::min(num_docs_, size_t(4096)));
 
         for (const auto& qt : query_tokens) {
             auto idf_it = idf_.find(qt);
@@ -99,29 +101,41 @@ public:
             auto idx_it = inverted_index_.find(qt);
             if (idx_it == inverted_index_.end()) continue;
 
-            for (const auto& posting : idx_it->second) {
+            // 对超长 posting list 限制处理量（高频词 IDF 已经很低，继续扫描收益极小）
+            const auto& postings = idx_it->second;
+            const size_t MAX_POSTING = 8000;
+            size_t pcount = std::min(postings.size(), MAX_POSTING);
+
+            for (size_t pi = 0; pi < pcount; ++pi) {
+                const auto& posting = postings[pi];
                 double dl = static_cast<double>(doc_lengths_[posting.doc_id]);
                 double tf = static_cast<double>(posting.tf);
                 double tf_norm = (tf * (K1 + 1.0))
                     / (tf + K1 * (1.0 - B + B * dl / avg_dl_));
-                scores[posting.doc_id] += idf_val * tf_norm;
+                score_map[posting.doc_id] += idf_val * tf_norm;
             }
         }
 
         std::vector<SearchResult> results;
-        for (size_t i = 0; i < num_docs_; ++i) {
-            if (scores[i] > 0.0) {
-                results.push_back({&(*fragments_)[i], scores[i]});
-            }
+        results.reserve(score_map.size());
+        for (const auto& [doc_id, score] : score_map) {
+            results.push_back({&(*fragments_)[doc_id], score});
         }
 
-        std::sort(results.begin(), results.end(),
-            [](const SearchResult& a, const SearchResult& b) {
-                return a.score > b.score;
-            });
-
         if (top_k > 0 && static_cast<size_t>(top_k) < results.size()) {
-            results.resize(top_k);
+            // partial_sort 仅排前 top_k 个，比全排序快
+            std::partial_sort(results.begin(),
+                              results.begin() + static_cast<ptrdiff_t>(top_k),
+                              results.end(),
+                              [](const SearchResult& a, const SearchResult& b) {
+                                  return a.score > b.score;
+                              });
+            results.resize(static_cast<size_t>(top_k));
+        } else {
+            std::sort(results.begin(), results.end(),
+                [](const SearchResult& a, const SearchResult& b) {
+                    return a.score > b.score;
+                });
         }
 
         return results;

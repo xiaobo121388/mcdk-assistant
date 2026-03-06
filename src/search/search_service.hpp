@@ -89,21 +89,37 @@ public:
         double      score;
     };
 
+    // 默认 top_k=200，防止 20000 个文件全量返回导致超时
+    static constexpr int DEFAULT_GAME_ASSET_TOP_K = 200;
+
     std::vector<AssetResult> search_game_assets(const std::string& keyword, int scope, int top_k = -1) const {
+        // 无上限时使用默认上限，避免大量文件返回导致超时
+        const int effective_top_k = (top_k > 0) ? top_k : DEFAULT_GAME_ASSET_TOP_K;
+
         std::vector<std::string> tokens;
         tokenize_en(keyword, tokens);
+        if (tokens.empty()) return {};
 
+        // 预处理：小写关键词和每个 token
         std::string kw_lower = keyword;
         for (auto& c : kw_lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+        // tokens 已经是 lowercase（tokenize_en 里做了 tolower）
 
         const GameAssetIndex* idx_bp = (scope == 0 || scope == 1) ? &game_assets_bp_ : nullptr;
         const GameAssetIndex* idx_rp = (scope == 0 || scope == 2) ? &game_assets_rp_ : nullptr;
 
+        // 用 doc_id 为 key 的稀疏 map，避免 string hash 开销
+        // 路径匹配分和 BM25 内容分分开汇总，最后合并
         std::unordered_map<std::string, double>      score_map;
         std::unordered_map<std::string, std::string> snippet_map;
+        score_map.reserve(512);
+        snippet_map.reserve(512);
 
+        // BM25 内容搜索（倒排，只命中文档才进 score_map）
         auto collect_bm25 = [&](const GameAssetIndex& idx) {
-            auto bm25_results = idx.engine.search(tokens, -1);
+            // 传 effective_top_k*4 做内部预限制，避免无上限全量排序
+            auto bm25_results = idx.engine.search(tokens, effective_top_k * 4);
             for (const auto& r : bm25_results) {
                 const std::string& path = r.fragment->file;
                 score_map[path] += r.score;
@@ -117,25 +133,26 @@ public:
         if (idx_bp) collect_bm25(*idx_bp);
         if (idx_rp) collect_bm25(*idx_rp);
 
+        // 路径名匹配：只对路径字符串做 find，不读取文件内容
+        // entries.second 不再使用（content 已在 fragments 中），避免额外内存访问
         auto add_path_score = [&](const GameAssetIndex& idx) {
-            for (const auto& entry : idx.entries) {
-                const std::string& rel = entry.first;
-                std::string rel_lower = rel;
-                for (auto& c : rel_lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            for (const auto& entry : idx.path_entries) {
+                // entry 只包含 (rel_path, rel_path_lower)
+                const std::string& rel       = entry.first;
+                const std::string& rel_lower = entry.second;
 
                 double path_score = 0.0;
+                // 精确子串匹配整个关键词（高权重）
                 if (!kw_lower.empty() && rel_lower.find(kw_lower) != std::string::npos)
                     path_score += 10.0;
+                // 逐 token 匹配（中等权重）
                 for (const auto& tok : tokens) {
                     if (!tok.empty() && rel_lower.find(tok) != std::string::npos)
                         path_score += 3.0;
                 }
                 if (path_score > 0.0) {
                     score_map[rel] += path_score;
-                    if (snippet_map.find(rel) == snippet_map.end() && !entry.second.empty()) {
-                        snippet_map[rel] = entry.second.size() > 300
-                            ? entry.second.substr(0, 300) + "..." : entry.second;
-                    }
+                    // snippet 只从已有 BM25 结果中取，路径命中不读内容
                 }
             }
         };
@@ -148,19 +165,29 @@ public:
         for (auto& [path, score] : score_map) {
             std::string snip;
             auto it = snippet_map.find(path);
-            if (it != snippet_map.end()) snip = it->second;
+            if (it != snippet_map.end()) snip = std::move(it->second);
             results.push_back({path, std::move(snip), score});
         }
-        std::sort(results.begin(), results.end(), [](const AssetResult& a, const AssetResult& b) {
-            return a.score != b.score ? a.score > b.score : a.rel_path < b.rel_path;
-        });
-        if (top_k > 0 && static_cast<size_t>(top_k) < results.size())
-            results.resize(static_cast<size_t>(top_k));
+
+        // 用 partial_sort 只排前 effective_top_k 个
+        if (static_cast<size_t>(effective_top_k) < results.size()) {
+            std::partial_sort(results.begin(),
+                              results.begin() + effective_top_k,
+                              results.end(),
+                              [](const AssetResult& a, const AssetResult& b) {
+                                  return a.score != b.score ? a.score > b.score : a.rel_path < b.rel_path;
+                              });
+            results.resize(static_cast<size_t>(effective_top_k));
+        } else {
+            std::sort(results.begin(), results.end(), [](const AssetResult& a, const AssetResult& b) {
+                return a.score != b.score ? a.score > b.score : a.rel_path < b.rel_path;
+            });
+        }
         return results;
     }
 
     size_t game_assets_count() const {
-        return game_assets_bp_.entries.size() + game_assets_rp_.entries.size();
+        return game_assets_bp_.path_entries.size() + game_assets_rp_.path_entries.size();
     }
 
 private:
@@ -171,7 +198,8 @@ private:
     };
 
     struct GameAssetIndex {
-        std::vector<std::pair<std::string,std::string>> entries;       // (rel_path, content)
+        // 轻量路径表：只存 (rel_path, rel_path_lower)，不再存文件内容副本
+        std::vector<std::pair<std::string,std::string>> path_entries;  // (rel_path, rel_path_lower)
         std::vector<DocFragment>                        fragments;
         std::vector<std::vector<std::string>>           tokenized_docs;
         BM25Engine                                      engine;
@@ -235,15 +263,17 @@ private:
         }
 
         if (cached.game_assets.size() >= 2) {
-            // GameAssetData::rel_paths + fragments（content 在 fragment 里，不再重复存储）
             auto restore_ga = [](GameAssetIndex& idx, IndexCache::GameAssetData& d) {
                 idx.fragments      = std::move(d.fragments);
                 idx.tokenized_docs = std::move(d.tokenized_docs);
-                // 重建 entries：key = rel_paths[i]，value = fragments[i].content（同一份内存）
-                idx.entries.resize(d.rel_paths.size());
+                // 重建 path_entries：(rel_path, rel_path_lower)，不再保存内容副本
+                idx.path_entries.resize(d.rel_paths.size());
                 for (size_t i = 0; i < d.rel_paths.size(); ++i) {
-                    idx.entries[i].first  = std::move(d.rel_paths[i]);
-                    idx.entries[i].second = idx.fragments[i].content;  // string_view 级别的共享
+                    std::string lower = d.rel_paths[i];
+                    for (auto& c : lower)
+                        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                    idx.path_entries[i].first  = std::move(d.rel_paths[i]);
+                    idx.path_entries[i].second = std::move(lower);
                 }
                 idx.engine.restore_index(
                     idx.fragments, idx.tokenized_docs,
@@ -263,12 +293,12 @@ private:
     void save_cache() {
         std::string fp = IndexCache::compute_fingerprint(knowledge_dir_);
 
-        // 提取 GA 的 rel_path 列表
+        // 提取 GA 的 rel_path 列表（从 path_entries 取原始路径）
         std::vector<std::string> bp_rel_paths, rp_rel_paths;
-        bp_rel_paths.reserve(game_assets_bp_.entries.size());
-        rp_rel_paths.reserve(game_assets_rp_.entries.size());
-        for (const auto& e : game_assets_bp_.entries) bp_rel_paths.push_back(e.first);
-        for (const auto& e : game_assets_rp_.entries) rp_rel_paths.push_back(e.first);
+        bp_rel_paths.reserve(game_assets_bp_.path_entries.size());
+        rp_rel_paths.reserve(game_assets_rp_.path_entries.size());
+        for (const auto& e : game_assets_bp_.path_entries) bp_rel_paths.push_back(e.first);
+        for (const auto& e : game_assets_rp_.path_entries) rp_rel_paths.push_back(e.first);
 
         std::vector<IndexCache::CatIndexRef> cat_refs = {
             {&api_index_.fragments,           &api_index_.tokenized_docs,           &api_index_.engine},
@@ -424,16 +454,21 @@ private:
                         content = ss.str();
                     }
                     std::string ga_path = "GameAssets/" + assets_rel;
-                    DocFragment frag{content, ga_path, 1, 0};
-                    std::pair<std::string,std::string> ep{ga_path, content};
+                    // 预计算小写路径，路径匹配时直接用，避免搜索时重复转换
+                    std::string ga_path_lower = ga_path;
+                    for (auto& c : ga_path_lower)
+                        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+                    DocFragment frag{std::move(content), ga_path, 1, 0};
+                    std::pair<std::string,std::string> pe{ga_path, std::move(ga_path_lower)};
 
                     if (assets_rel.find("behavior_packs/") == 0) {
                         std::lock_guard<std::mutex> lk(bp_mutex);
-                        game_assets_bp_.entries.push_back(std::move(ep));
+                        game_assets_bp_.path_entries.push_back(std::move(pe));
                         game_assets_bp_.fragments.push_back(std::move(frag));
                     } else {
                         std::lock_guard<std::mutex> lk(rp_mutex);
-                        game_assets_rp_.entries.push_back(std::move(ep));
+                        game_assets_rp_.path_entries.push_back(std::move(pe));
                         game_assets_rp_.fragments.push_back(std::move(frag));
                     }
                 }
