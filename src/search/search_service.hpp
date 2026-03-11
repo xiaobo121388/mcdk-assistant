@@ -385,10 +385,10 @@ private:
             }
             IndexCache::CacheData cached;
             if (IndexCache::load(cache_path_, "", cached, /*skip_fingerprint_check=*/true)) {
-                std::cout << "[MCDK] 仅缓存模式：从缓存文件恢复索引..." << std::endl;
+                std::cout << "[MCDK] 缓存模式：从缓存文件恢复索引..." << std::endl;
                 restore_from_cache(std::move(cached));
             } else {
-                std::cerr << "[MCDK] 仅缓存模式：缓存文件加载失败: " << cache_path_ << std::endl;
+                std::cerr << "[MCDK] 缓存模式：缓存文件加载失败: " << cache_path_ << std::endl;
             }
             return;
         }
