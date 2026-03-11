@@ -68,6 +68,18 @@ if(WIN32)
     target_link_libraries(${PROJECT_NAME} PRIVATE ws2_32)
 endif()
 
+# ── Linux 静态链接 libstdc++/libgcc/libm（保持 libc 动态以兼容 glibc）──
+# 在 ECS 等生产环境部署时无需安装额外运行时，二进制可直接运行
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID)
+    target_link_options(${PROJECT_NAME} PRIVATE
+        -static-libstdc++
+        -static-libgcc
+        # libm/libpthread 通过 -Wl 静态优先链接
+        -Wl,-Bstatic -lm
+        -Wl,-Bdynamic   # 后续 libc/ld 保持动态
+    )
+endif()
+
 # ── Lite 版（仅资料库搜索 + 网易差异工具）────────────
 
 set(MCDK_LITE_SOURCES
@@ -91,6 +103,15 @@ target_link_libraries(mcdk-asst-lite PRIVATE
 
 if(WIN32)
     target_link_libraries(mcdk-asst-lite PRIVATE ws2_32)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID)
+    target_link_options(mcdk-asst-lite PRIVATE
+        -static-libstdc++
+        -static-libgcc
+        -Wl,-Bstatic -lm
+        -Wl,-Bdynamic
+    )
 endif()
 
 # ── 安装 ──────────────────────────────────────────────
