@@ -44,7 +44,7 @@ target_include_directories(stb INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/libs/stb
 )
 
-# ── 主程序 ────────────────────────────────────────────
+# ── 主程序（完整版）─────────────────────────────────────
 
 file(GLOB_RECURSE MCDK_SOURCES
     src/*.cpp
@@ -68,9 +68,34 @@ if(WIN32)
     target_link_libraries(${PROJECT_NAME} PRIVATE ws2_32)
 endif()
 
+# ── Lite 版（仅资料库搜索 + 网易差异工具）────────────
+
+set(MCDK_LITE_SOURCES
+    src/main.cpp
+)
+
+add_executable(mcdk-asst-lite ${MCDK_LITE_SOURCES})
+
+target_compile_definitions(mcdk-asst-lite PRIVATE MCDK_LITE)
+
+target_include_directories(mcdk-asst-lite PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_link_libraries(mcdk-asst-lite PRIVATE
+    mcp
+    cppjieba
+    nlohmann_json::nlohmann_json
+    Threads::Threads
+)
+
+if(WIN32)
+    target_link_libraries(mcdk-asst-lite PRIVATE ws2_32)
+endif()
+
 # ── 安装 ──────────────────────────────────────────────
 
-install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION .)
+install(TARGETS ${PROJECT_NAME} mcdk-asst-lite RUNTIME DESTINATION .)
 install(DIRECTORY dicts/ DESTINATION dicts)
 install(DIRECTORY knowledge/ DESTINATION knowledge)
 

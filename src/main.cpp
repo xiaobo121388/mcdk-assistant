@@ -2,10 +2,12 @@
 #include "search/index_cache.hpp"
 #include "tools/register_search.hpp"
 #include "tools/register_netease.hpp"
+#ifndef MCDK_LITE
 #include "tools/register_jsonui.hpp"
 #include "tools/register_pixel_art.hpp"
 #include "tools/register_model.hpp"
 #include "tools/register_animation.hpp"
+#endif
 #include <mcp_server.h>
 #include <iostream>
 #include <string>
@@ -78,8 +80,13 @@ int main() {
     mcp::server::configuration conf;
     conf.host    = "127.0.0.1";
     conf.port    = 18766;
+#ifdef MCDK_LITE
+    conf.name    = "mcdk-asst-lite";
+    conf.version = "0.5.0-lite";
+#else
     conf.name    = "mcdk-assistant";
     conf.version = "0.5.0";
+#endif
 
     mcp::server srv(conf);
 
@@ -87,12 +94,19 @@ int main() {
     std::string effective_knowledge_dir = cache_only_mode ? "" : knowledge_dir;
     mcdk::register_search_tools(srv, *search_svc, effective_knowledge_dir);
     mcdk::register_netease_tools(srv);
+#ifndef MCDK_LITE
     mcdk::register_jsonui_tools(srv);
     mcdk::register_pixel_art_tools(srv);
     mcdk::register_model_tools(srv);
     mcdk::register_animation_tools(srv);
+#endif
 
-    std::cout << "[MCDK] MCP server starting on " << conf.host << ":" << conf.port << std::endl;
+#ifdef MCDK_LITE
+    std::cout << "[MCDK-Lite] ";
+#else
+    std::cout << "[MCDK] ";
+#endif
+    std::cout << "MCP server starting on " << conf.host << ":" << conf.port << std::endl;
     std::cout << "[MCDK] docs indexed: "         << search_svc->doc_count()         << std::endl;
     std::cout << "[MCDK] game assets indexed: "  << search_svc->game_assets_count() << std::endl;
     if (cache_only_mode) {
