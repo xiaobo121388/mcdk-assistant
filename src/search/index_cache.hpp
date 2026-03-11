@@ -92,44 +92,47 @@ public:
                      const std::vector<CatIndexRef>&  cat_refs,
                      const std::vector<GameIndexRef>& ga_refs)
     {
-        // 先写入内存 buffer，再一次性 fwrite（减少磁盘 I/O 次数）
-        std::vector<char> buf;
-        buf.reserve(256 * 1024 * 1024);  // 预留 256MB
-
-        // Header
-        append_raw(buf, MAGIC, 8);
-        append_u32(buf, VERSION);
-        append_string(buf, fingerprint);
-
-        // Categories
-        append_u32(buf, static_cast<uint32_t>(cat_refs.size()));
-        for (const auto& r : cat_refs) {
-            append_fragments(buf, *r.fragments);
-            append_tokenized(buf, *r.tokenized_docs);
-            append_bm25(buf, *r.engine);
-        }
-
-        // GameAssets（只存 rel_path，不再存 content）
-        append_u32(buf, static_cast<uint32_t>(ga_refs.size()));
-        for (const auto& r : ga_refs) {
-            append_u32(buf, static_cast<uint32_t>(r.rel_paths->size()));
-            for (const auto& rp : *r.rel_paths)
-                append_string(buf, rp);
-            append_fragments(buf, *r.fragments);
-            append_tokenized(buf, *r.tokenized_docs);
-            append_bm25(buf, *r.engine);
-        }
-
-        // 一次性写入文件
-        std::ofstream ofs(cache_path, std::ios::binary);
-        if (!ofs.is_open()) {
+        // ── 修复③：流式写文件，无需预分配大 buffer ──
+        // 使用 64KB 写缓冲区，通过 setvbuf 减少系统调用次数
+        FILE* fp = std::fopen(cache_path.c_str(), "wb");
+        if (!fp) {
             std::cerr << "[MCDK] cache: cannot open for writing: " << cache_path << std::endl;
             return false;
         }
-        ofs.write(buf.data(), static_cast<std::streamsize>(buf.size()));
-        ofs.flush();
-        if (ofs.good()) {
-            std::cout << "[MCDK] cache: saved " << (buf.size() / 1024 / 1024)
+        static constexpr size_t WRITE_BUF = 64 * 1024;
+        char wbuf[WRITE_BUF];
+        std::setvbuf(fp, wbuf, _IOFBF, WRITE_BUF);
+
+        // Header
+        std::fwrite(MAGIC, 1, 8, fp);
+        write_u32(fp, VERSION);
+        write_string(fp, fingerprint);
+
+        // Categories
+        write_u32(fp, static_cast<uint32_t>(cat_refs.size()));
+        for (const auto& r : cat_refs) {
+            write_fragments(fp, *r.fragments);
+            write_tokenized(fp, *r.tokenized_docs);
+            write_bm25(fp, *r.engine);
+        }
+
+        // GameAssets（只存 rel_path，不再存 content）
+        write_u32(fp, static_cast<uint32_t>(ga_refs.size()));
+        for (const auto& r : ga_refs) {
+            write_u32(fp, static_cast<uint32_t>(r.rel_paths->size()));
+            for (const auto& rp : *r.rel_paths)
+                write_string(fp, rp);
+            write_fragments(fp, *r.fragments);
+            write_tokenized(fp, *r.tokenized_docs);
+            write_bm25(fp, *r.engine);
+        }
+
+        bool ok = std::fflush(fp) == 0 && std::ferror(fp) == 0;
+        // 获取写入大小用于日志
+        long written = std::ftell(fp);
+        std::fclose(fp);
+        if (ok && written > 0) {
+            std::cout << "[MCDK] cache: saved " << (written / 1024 / 1024)
                       << " MB to " << cache_path << std::endl;
             return true;
         }
@@ -137,211 +140,219 @@ public:
         return false;
     }
 
-    // ── 加载：整块读入后指针解析 ──
+    // ── 修复②：流式 fread 解析，消除整块读入的双倍峰值内存 ──
     // skip_fingerprint_check: 仅缓存模式时跳过 fingerprint 校验
     static bool load(const std::string& cache_path,
                      const std::string& expected_fp,
                      CacheData& out,
                      bool skip_fingerprint_check = false)
     {
-        // 整块读入
-        std::ifstream ifs(cache_path, std::ios::binary | std::ios::ate);
-        if (!ifs.is_open()) return false;
-        std::streamsize fsize = ifs.tellg();
-        if (fsize < 16) return false;
-        ifs.seekg(0);
+        FILE* fp = std::fopen(cache_path.c_str(), "rb");
+        if (!fp) return false;
 
-        std::vector<char> buf(static_cast<size_t>(fsize));
-        ifs.read(buf.data(), fsize);
-        if (!ifs.good()) return false;
+        // 设置 64KB 读缓冲区，减少系统调用次数
+        static constexpr size_t READ_BUF = 64 * 1024;
+        char rbuf[READ_BUF];
+        std::setvbuf(fp, rbuf, _IOFBF, READ_BUF);
 
-        const char* p   = buf.data();
-        const char* end = p + buf.size();
+        // 快速检查文件大小
+        std::fseek(fp, 0, SEEK_END);
+        long fsize = std::ftell(fp);
+        std::fseek(fp, 0, SEEK_SET);
+        if (fsize < 16) { std::fclose(fp); return false; }
 
         // Magic
-        if (end - p < 8 || std::memcmp(p, MAGIC, 8) != 0) {
+        char magic[8];
+        if (std::fread(magic, 1, 8, fp) != 8 || std::memcmp(magic, MAGIC, 8) != 0) {
             std::cerr << "[MCDK] cache: bad magic" << std::endl;
-            return false;
+            std::fclose(fp); return false;
         }
-        p += 8;
 
         // Version
-        uint32_t ver = read_u32(p, end);
+        uint32_t ver = fread_u32(fp);
         if (ver != VERSION) {
             std::cout << "[MCDK] cache: version " << ver << " != " << VERSION << ", rebuilding" << std::endl;
-            return false;
+            std::fclose(fp); return false;
         }
 
         // Fingerprint
-        out.fingerprint = read_string(p, end);
+        out.fingerprint = fread_string(fp);
         if (!skip_fingerprint_check && out.fingerprint != expected_fp) {
             std::cout << "[MCDK] cache: fingerprint mismatch, rebuilding" << std::endl;
-            return false;
+            std::fclose(fp); return false;
         }
 
         // Categories
-        uint32_t cat_n = read_u32(p, end);
+        uint32_t cat_n = fread_u32(fp);
         out.categories.resize(cat_n);
         for (uint32_t i = 0; i < cat_n; ++i) {
-            read_fragments(p, end, out.categories[i].fragments);
-            read_tokenized(p, end, out.categories[i].tokenized_docs);
-            read_bm25(p, end, out.categories[i].bm25);
-            if (p > end) return false;
+            if (!fread_fragments(fp, out.categories[i].fragments)) { std::fclose(fp); return false; }
+            if (!fread_tokenized(fp, out.categories[i].tokenized_docs)) { std::fclose(fp); return false; }
+            if (!fread_bm25(fp, out.categories[i].bm25)) { std::fclose(fp); return false; }
         }
 
         // GameAssets
-        uint32_t ga_n = read_u32(p, end);
+        uint32_t ga_n = fread_u32(fp);
         out.game_assets.resize(ga_n);
         for (uint32_t i = 0; i < ga_n; ++i) {
-            uint32_t rp_n = read_u32(p, end);
+            uint32_t rp_n = fread_u32(fp);
             out.game_assets[i].rel_paths.resize(rp_n);
             for (uint32_t j = 0; j < rp_n; ++j)
-                out.game_assets[i].rel_paths[j] = read_string(p, end);
-            read_fragments(p, end, out.game_assets[i].fragments);
-            read_tokenized(p, end, out.game_assets[i].tokenized_docs);
-            read_bm25(p, end, out.game_assets[i].bm25);
-            if (p > end) return false;
+                out.game_assets[i].rel_paths[j] = fread_string(fp);
+            if (!fread_fragments(fp, out.game_assets[i].fragments)) { std::fclose(fp); return false; }
+            if (!fread_tokenized(fp, out.game_assets[i].tokenized_docs)) { std::fclose(fp); return false; }
+            if (!fread_bm25(fp, out.game_assets[i].bm25)) { std::fclose(fp); return false; }
         }
 
-        return true;
+        bool ok = std::ferror(fp) == 0;
+        std::fclose(fp);
+        return ok;
     }
 
 private:
-    // ── 写入辅助（向 vector<char> append）──
+    // ══════════════════════════════════════════════════════════════════
+    // ── 流式写入辅助（直接 fwrite，无中间 buffer）──
+    // ══════════════════════════════════════════════════════════════════
 
-    static void append_raw(std::vector<char>& buf, const void* data, size_t n) {
-        const char* d = static_cast<const char*>(data);
-        buf.insert(buf.end(), d, d + n);
+    static void write_u32(FILE* fp, uint32_t v) {
+        std::fwrite(&v, 4, 1, fp);
     }
-    static void append_u32(std::vector<char>& buf, uint32_t v) {
-        append_raw(buf, &v, 4);
+    static void write_u64(FILE* fp, uint64_t v) {
+        std::fwrite(&v, 8, 1, fp);
     }
-    static void append_u64(std::vector<char>& buf, uint64_t v) {
-        append_raw(buf, &v, 8);
+    static void write_double(FILE* fp, double v) {
+        std::fwrite(&v, 8, 1, fp);
     }
-    static void append_double(std::vector<char>& buf, double v) {
-        append_raw(buf, &v, 8);
-    }
-    static void append_string(std::vector<char>& buf, const std::string& s) {
-        append_u32(buf, static_cast<uint32_t>(s.size()));
-        if (!s.empty()) append_raw(buf, s.data(), s.size());
+    static void write_string(FILE* fp, const std::string& s) {
+        uint32_t len = static_cast<uint32_t>(s.size());
+        std::fwrite(&len, 4, 1, fp);
+        if (len > 0) std::fwrite(s.data(), 1, len, fp);
     }
 
-    static void append_fragments(std::vector<char>& buf, const std::vector<DocFragment>& frags) {
-        append_u32(buf, static_cast<uint32_t>(frags.size()));
+    static void write_fragments(FILE* fp, const std::vector<DocFragment>& frags) {
+        write_u32(fp, static_cast<uint32_t>(frags.size()));
         for (const auto& f : frags) {
-            append_string(buf, f.content);
-            append_string(buf, f.file);
-            append_u32(buf, static_cast<uint32_t>(f.line_start));
-            append_u32(buf, static_cast<uint32_t>(f.line_end));
+            write_string(fp, f.content);
+            write_string(fp, f.file);
+            write_u32(fp, static_cast<uint32_t>(f.line_start));
+            write_u32(fp, static_cast<uint32_t>(f.line_end));
         }
     }
 
-    static void append_tokenized(std::vector<char>& buf, const std::vector<std::vector<std::string>>& docs) {
-        append_u32(buf, static_cast<uint32_t>(docs.size()));
+    static void write_tokenized(FILE* fp, const std::vector<std::vector<std::string>>& docs) {
+        write_u32(fp, static_cast<uint32_t>(docs.size()));
         for (const auto& doc : docs) {
-            append_u32(buf, static_cast<uint32_t>(doc.size()));
-            for (const auto& tok : doc) append_string(buf, tok);
+            write_u32(fp, static_cast<uint32_t>(doc.size()));
+            for (const auto& tok : doc) write_string(fp, tok);
         }
     }
 
-    static void append_bm25(std::vector<char>& buf, const BM25Engine& e) {
+    static void write_bm25(FILE* fp, const BM25Engine& e) {
         const auto& dl = e.doc_lengths();
-        append_u32(buf, static_cast<uint32_t>(dl.size()));
-        for (int v : dl) append_u32(buf, static_cast<uint32_t>(v));
+        write_u32(fp, static_cast<uint32_t>(dl.size()));
+        for (int v : dl) write_u32(fp, static_cast<uint32_t>(v));
 
-        append_double(buf, e.avg_dl());
+        write_double(fp, e.avg_dl());
 
         const auto& idf = e.idf();
-        append_u32(buf, static_cast<uint32_t>(idf.size()));
+        write_u32(fp, static_cast<uint32_t>(idf.size()));
         for (const auto& [term, val] : idf) {
-            append_string(buf, term);
-            append_double(buf, val);
+            write_string(fp, term);
+            write_double(fp, val);
         }
 
         const auto& inv = e.inverted_index();
-        append_u32(buf, static_cast<uint32_t>(inv.size()));
+        write_u32(fp, static_cast<uint32_t>(inv.size()));
         for (const auto& [term, postings] : inv) {
-            append_string(buf, term);
-            append_u32(buf, static_cast<uint32_t>(postings.size()));
+            write_string(fp, term);
+            write_u32(fp, static_cast<uint32_t>(postings.size()));
             for (const auto& posting : postings) {
-                append_u64(buf, static_cast<uint64_t>(posting.doc_id));
-                append_u32(buf, static_cast<uint32_t>(posting.tf));
+                write_u64(fp, static_cast<uint64_t>(posting.doc_id));
+                write_u32(fp, static_cast<uint32_t>(posting.tf));
             }
         }
     }
 
-    // ── 读取辅助（从内存指针解析，移动 p）──
+    // ══════════════════════════════════════════════════════════════════
+    // ── 流式读取辅助（直接 fread，无整块 buffer）──
+    // ══════════════════════════════════════════════════════════════════
 
-    static uint32_t read_u32(const char*& p, const char* end) {
-        if (p + 4 > end) return 0;
-        uint32_t v; std::memcpy(&v, p, 4); p += 4; return v;
+    static uint32_t fread_u32(FILE* fp) {
+        uint32_t v = 0;
+        std::fread(&v, 4, 1, fp);
+        return v;
     }
-    static uint64_t read_u64(const char*& p, const char* end) {
-        if (p + 8 > end) return 0;
-        uint64_t v; std::memcpy(&v, p, 8); p += 8; return v;
+    static uint64_t fread_u64(FILE* fp) {
+        uint64_t v = 0;
+        std::fread(&v, 8, 1, fp);
+        return v;
     }
-    static double read_double(const char*& p, const char* end) {
-        if (p + 8 > end) return 0.0;
-        double v; std::memcpy(&v, p, 8); p += 8; return v;
+    static double fread_double(FILE* fp) {
+        double v = 0.0;
+        std::fread(&v, 8, 1, fp);
+        return v;
     }
-    static std::string read_string(const char*& p, const char* end) {
-        uint32_t len = read_u32(p, end);
-        if (len == 0 || p + len > end) { p += len; return {}; }
-        std::string s(p, len); p += len; return s;
+    static std::string fread_string(FILE* fp) {
+        uint32_t len = fread_u32(fp);
+        if (len == 0) return {};
+        std::string s(len, '\0');
+        if (std::fread(s.data(), 1, len, fp) != len) return {};
+        return s;
     }
 
-    static void read_fragments(const char*& p, const char* end, std::vector<DocFragment>& frags) {
-        uint32_t n = read_u32(p, end);
+    static bool fread_fragments(FILE* fp, std::vector<DocFragment>& frags) {
+        uint32_t n = fread_u32(fp);
         frags.resize(n);
         for (uint32_t i = 0; i < n; ++i) {
-            frags[i].content    = read_string(p, end);
-            frags[i].file       = read_string(p, end);
-            frags[i].line_start = static_cast<int>(read_u32(p, end));
-            frags[i].line_end   = static_cast<int>(read_u32(p, end));
+            frags[i].content    = fread_string(fp);
+            frags[i].file       = fread_string(fp);
+            frags[i].line_start = static_cast<int>(fread_u32(fp));
+            frags[i].line_end   = static_cast<int>(fread_u32(fp));
         }
+        return std::ferror(fp) == 0;
     }
 
-    static void read_tokenized(const char*& p, const char* end,
-                                std::vector<std::vector<std::string>>& docs) {
-        uint32_t n = read_u32(p, end);
+    static bool fread_tokenized(FILE* fp, std::vector<std::vector<std::string>>& docs) {
+        uint32_t n = fread_u32(fp);
         docs.resize(n);
         for (uint32_t i = 0; i < n; ++i) {
-            uint32_t m = read_u32(p, end);
+            uint32_t m = fread_u32(fp);
             docs[i].resize(m);
             for (uint32_t j = 0; j < m; ++j)
-                docs[i][j] = read_string(p, end);
+                docs[i][j] = fread_string(fp);
         }
+        return std::ferror(fp) == 0;
     }
 
-    static void read_bm25(const char*& p, const char* end, BM25State& s) {
-        uint32_t dl_n = read_u32(p, end);
+    static bool fread_bm25(FILE* fp, BM25State& s) {
+        uint32_t dl_n = fread_u32(fp);
         s.doc_lengths.resize(dl_n);
         for (uint32_t i = 0; i < dl_n; ++i)
-            s.doc_lengths[i] = static_cast<int>(read_u32(p, end));
+            s.doc_lengths[i] = static_cast<int>(fread_u32(fp));
 
-        s.avg_dl = read_double(p, end);
+        s.avg_dl = fread_double(fp);
 
-        uint32_t idf_n = read_u32(p, end);
+        uint32_t idf_n = fread_u32(fp);
         s.idf.reserve(idf_n);
         for (uint32_t i = 0; i < idf_n; ++i) {
-            std::string term = read_string(p, end);
-            double val = read_double(p, end);
+            std::string term = fread_string(fp);
+            double val = fread_double(fp);
             s.idf[std::move(term)] = val;
         }
 
-        uint32_t inv_n = read_u32(p, end);
+        uint32_t inv_n = fread_u32(fp);
         s.inverted_index.reserve(inv_n);
         for (uint32_t i = 0; i < inv_n; ++i) {
-            std::string term = read_string(p, end);
-            uint32_t post_n = read_u32(p, end);
+            std::string term = fread_string(fp);
+            uint32_t post_n = fread_u32(fp);
             std::vector<BM25Engine::Posting> postings(post_n);
             for (uint32_t j = 0; j < post_n; ++j) {
-                postings[j].doc_id = static_cast<size_t>(read_u64(p, end));
-                postings[j].tf     = static_cast<int>(read_u32(p, end));
+                postings[j].doc_id = static_cast<size_t>(fread_u64(fp));
+                postings[j].tf     = static_cast<int>(fread_u32(fp));
             }
             s.inverted_index[std::move(term)] = std::move(postings);
         }
+        return std::ferror(fp) == 0;
     }
 };
 

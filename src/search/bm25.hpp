@@ -34,7 +34,6 @@ public:
     void build_index(const std::vector<DocFragment>& fragments,
                      const std::vector<std::vector<std::string>>& tokenized_docs) {
         fragments_ = &fragments;
-        doc_tokens_ = &tokenized_docs;
         size_t n = fragments.size();
         if (n == 0) return;
 
@@ -69,15 +68,14 @@ public:
         }
     }
 
-    // 直接恢复已有的倒排索引，跳过重新计算
+    // 直接恢复已有的倒排索引，跳过重新计算（tokenized_docs 不再需要，传参仅为兼容旧调用）
     void restore_index(const std::vector<DocFragment>& fragments,
-                       const std::vector<std::vector<std::string>>& tokenized_docs,
+                       const std::vector<std::vector<std::string>>& /*tokenized_docs*/,
                        std::vector<int>&& doc_lengths,
                        double avg_dl,
                        std::unordered_map<std::string, double>&& idf,
                        std::unordered_map<std::string, std::vector<Posting>>&& inverted_index) {
         fragments_ = &fragments;
-        doc_tokens_ = &tokenized_docs;
         num_docs_ = fragments.size();
         doc_lengths_ = std::move(doc_lengths);
         avg_dl_ = avg_dl;
@@ -151,7 +149,6 @@ public:
 
 private:
     const std::vector<DocFragment>*              fragments_ = nullptr;
-    const std::vector<std::vector<std::string>>* doc_tokens_ = nullptr;
     std::vector<int>                             doc_lengths_;
     double                                       avg_dl_ = 0;
     size_t                                       num_docs_ = 0;

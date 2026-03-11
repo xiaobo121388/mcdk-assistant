@@ -410,20 +410,39 @@ private:
         build_indices();
 
         if (!cache_path_.empty()) {
-            save_cache();
+            save_cache();  // save_cache() 内部已释放 tokenized_docs
+        } else {
+            // 无缓存路径时同样释放 tokenized_docs，运行时搜索不需要它
+            auto free_td = [](CategoryIndex& idx) {
+                std::vector<std::vector<std::string>>().swap(idx.tokenized_docs);
+            };
+            free_td(api_index_);
+            free_td(event_index_);
+            free_td(enum_index_);
+            free_td(wiki_index_);
+            free_td(qumod_index_);
+            free_td(netease_guide_index_);
+            auto free_td_ga = [](GameAssetIndex& idx) {
+                std::vector<std::vector<std::string>>().swap(idx.tokenized_docs);
+            };
+            free_td_ga(game_assets_bp_);
+            free_td_ga(game_assets_rp_);
+            std::cout << "[MCDK] tokenized_docs released (no-cache mode)" << std::endl;
         }
     }
 
     // 从缓存直接恢复，完全跳过 build_index()
     void restore_from_cache(IndexCache::CacheData&& cached) {
         auto restore_cat = [](CategoryIndex& idx, IndexCache::CatData& d) {
-            idx.fragments      = std::move(d.fragments);
-            idx.tokenized_docs = std::move(d.tokenized_docs);
+            idx.fragments = std::move(d.fragments);
+            // restore_index 不再持有 tokenized_docs 指针，传临时引用即可
             idx.engine.restore_index(
-                idx.fragments, idx.tokenized_docs,
+                idx.fragments, d.tokenized_docs,
                 std::move(d.bm25.doc_lengths), d.bm25.avg_dl,
                 std::move(d.bm25.idf), std::move(d.bm25.inverted_index)
             );
+            // restore 完成后立即释放分词数据，运行时搜索不再需要
+            std::vector<std::vector<std::string>>().swap(d.tokenized_docs);
         };
 
         if (cached.categories.size() >= 6) {
@@ -437,8 +456,7 @@ private:
 
         if (cached.game_assets.size() >= 2) {
             auto restore_ga = [](GameAssetIndex& idx, IndexCache::GameAssetData& d) {
-                idx.fragments      = std::move(d.fragments);
-                idx.tokenized_docs = std::move(d.tokenized_docs);
+                idx.fragments = std::move(d.fragments);
                 // 重建 path_entries：(rel_path, rel_path_lower)，不再保存内容副本
                 idx.path_entries.resize(d.rel_paths.size());
                 for (size_t i = 0; i < d.rel_paths.size(); ++i) {
@@ -449,15 +467,18 @@ private:
                     idx.path_entries[i].second = std::move(lower);
                 }
                 idx.engine.restore_index(
-                    idx.fragments, idx.tokenized_docs,
+                    idx.fragments, d.tokenized_docs,
                     std::move(d.bm25.doc_lengths), d.bm25.avg_dl,
                     std::move(d.bm25.idf), std::move(d.bm25.inverted_index)
                 );
+                // restore 完成后立即释放分词数据
+                std::vector<std::vector<std::string>>().swap(d.tokenized_docs);
             };
             restore_ga(game_assets_bp_, cached.game_assets[0]);
             restore_ga(game_assets_rp_, cached.game_assets[1]);
         }
 
+        // CacheData 析构时 categories/game_assets 里剩余的临时内存自动释放
         std::cout << "[MCDK] 缓存恢复完成: " << doc_count() << " fragments, "
                   << game_assets_count() << " game assets" << std::endl;
     }
@@ -488,6 +509,27 @@ private:
         };
 
         IndexCache::save(cache_path_, fp, cat_refs, ga_refs);
+
+        // ── 修复①：缓存写完后立即释放 tokenized_docs ──
+        // 运行时搜索完全不读 tokenized_docs，只有构建索引时用到。
+        // 200MB 原文 → tokenized_docs 约 300MB，3GB 原文对应约 4.5GB，全部可释放。
+        auto free_tokenized = [](CategoryIndex& idx) {
+            std::vector<std::vector<std::string>>().swap(idx.tokenized_docs);
+        };
+        free_tokenized(api_index_);
+        free_tokenized(event_index_);
+        free_tokenized(enum_index_);
+        free_tokenized(wiki_index_);
+        free_tokenized(qumod_index_);
+        free_tokenized(netease_guide_index_);
+
+        auto free_tokenized_ga = [](GameAssetIndex& idx) {
+            std::vector<std::vector<std::string>>().swap(idx.tokenized_docs);
+        };
+        free_tokenized_ga(game_assets_bp_);
+        free_tokenized_ga(game_assets_rp_);
+
+        std::cout << "[MCDK] tokenized_docs released after cache save" << std::endl;
     }
 
     // ── 搜索辅助 ──

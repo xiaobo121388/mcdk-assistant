@@ -13,6 +13,8 @@
 #include <string>
 #include <memory>
 #include <filesystem>
+#include <thread>
+#include <algorithm>
 
 #ifdef _WIN32
 #define NOMINMAX
@@ -96,6 +98,8 @@ int main() {
     conf.name    = "mcdk-assistant";
     conf.version = "0.5.0";
 #endif
+    // 线程池最少 6 线程，避免 2 核 ECS 上只有 2 线程导致耗时工具阻塞搜索请求
+    conf.threadpool_size = std::max(std::thread::hardware_concurrency(), 6u);
 
     mcp::server srv(conf);
 
