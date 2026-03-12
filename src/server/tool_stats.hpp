@@ -148,10 +148,15 @@ private:
             ifs >> j;
             if (!j.is_object()) return;
             for (auto& [k, v] : j.items()) {
+                uint64_t val = 0;
                 if (v.is_number_unsigned())
-                    base_map_[k] = v.get<uint64_t>();
+                    val = v.get<uint64_t>();
                 else if (v.is_number_integer())
-                    base_map_[k] = static_cast<uint64_t>(std::max(int64_t(0), v.get<int64_t>()));
+                    val = static_cast<uint64_t>(std::max(int64_t(0), v.get<int64_t>()));
+                base_map_[k] = val;
+                // 预初始化 counters_，确保 get_snapshot() 能遍历到所有历史工具
+                // 即使重启后还没有新调用，历史数据也能正常显示
+                counters_.emplace(k, 0ULL);
             }
         } catch (...) {}
     }
