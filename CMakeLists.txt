@@ -68,6 +68,14 @@ if(WIN32)
     target_link_libraries(${PROJECT_NAME} PRIVATE ws2_32)
 endif()
 
+# ── Linux 编译警告抑制 ──────────────────────────────────
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID)
+    target_compile_options(${PROJECT_NAME} PRIVATE
+        -Wno-deprecated-declarations
+        -Wno-unused-result
+    )
+endif()
+
 # ── Linux 静态链接 libstdc++/libgcc/libm（保持 libc 动态以兼容 glibc）──
 # 在 ECS 等生产环境部署时无需安装额外运行时，二进制可直接运行
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID)
@@ -103,6 +111,13 @@ target_link_libraries(mcdk-asst-lite PRIVATE
 
 if(WIN32)
     target_link_libraries(mcdk-asst-lite PRIVATE ws2_32)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID)
+    target_compile_options(mcdk-asst-lite PRIVATE
+        -Wno-deprecated-declarations
+        -Wno-unused-result
+    )
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID)
