@@ -180,19 +180,19 @@ private:
     // ── 后台 flush 线程 ───────────────────────────────────────────────────────
     void flush_loop() {
         while (true) {
+            bool should_stop = false;
             {
                 std::unique_lock<std::mutex> lk(cv_mtx_);
                 cv_.wait_for(lk, std::chrono::seconds(FLUSH_INTERVAL_SEC),
                              [this] { return stop_; });
+                should_stop = stop_;
             }
+            // stop 时不在这里 flush，由析构函数负责最终写盘
+            if (should_stop) break;
             {
                 std::shared_lock<std::shared_mutex> rl(map_mtx_);
                 std::lock_guard<std::mutex>         bl(base_mtx_);
                 flush_locked();
-            }
-            {
-                std::lock_guard<std::mutex> lk(cv_mtx_);
-                if (stop_) break;
             }
         }
     }
