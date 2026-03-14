@@ -75,8 +75,10 @@ int main() {
     if (cache_only_mode) {
         std::cout << "[MCDK] 缓存解析：无外部资料，正在从索引文件解析..." << std::endl;
     } else if (!has_knowledge && !has_cache) {
+#ifndef MCDK_SERVER
         std::cerr << "[MCDK] 错误：缺少知识库目录和缓存文件，无法启动。" << std::endl;
         return 1;
+#endif
     } else {
         std::cout << "[MCDK] 正在初始化知识库索引，请稍候..." << std::endl;
     }

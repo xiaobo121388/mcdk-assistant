@@ -30,6 +30,9 @@
 #include <future>
 #include <atomic>
 #include <optional>
+#ifndef _WIN32
+#  include <pthread.h>
+#endif
 
 
 namespace mcp {
@@ -179,29 +182,85 @@ namespace mcp {
      * Replaces httplib's fixed-size ThreadPool.  There is no upper bound on
      * concurrent connections; each enqueued task gets its own thread.
      * shutdown() waits for all active tasks to finish before returning.
+     *
+     * On Linux the default thread stack is 8 MB, which limits concurrency to
+     * ~50 connections in 400 MB of free RAM.  We use pthread_attr to shrink
+     * the stack to stack_size_ (default 256 KB) so that each connection only
+     * costs ~256 KB, allowing ~1300+ simultaneous connections in the same RAM.
+     * On Windows std::thread is used unchanged (MSVC default stack is 1 MB).
      */
     class elastic_task_queue : public httplib::TaskQueue {
     public:
+        /** Stack size for each IO thread (bytes).  Tune as needed. */
+        static constexpr std::size_t stack_size_{256 * 1024}; // 256 KB
+
+        ~elastic_task_queue() {
+            // Safety net: if httplib forgot to call shutdown(), wait here so
+            // that detached threads don't access a destroyed object.
+            shutdown();
+        }
+
         bool enqueue(std::function<void()> fn) override {
             {
                 std::lock_guard<std::mutex> lk(m_);
                 if (shutdown_) return false;
                 ++active_;
             }
+
+#ifdef _WIN32
+            // Windows: std::thread default stack (1 MB) is acceptable
             std::thread([this, fn = std::move(fn)]() mutable {
                 try { fn(); } catch (...) {}
                 std::lock_guard<std::mutex> lk(m_);
                 if (--active_ == 0 && shutdown_) cv_.notify_all();
             }).detach();
+#else
+            // Linux/POSIX: use pthread_attr to set a small stack (256 KB)
+            // so that each blocked IO thread only costs stack_size_ of RAM.
+            struct wrapper_t {
+                elastic_task_queue*      q;
+                std::function<void()>    fn;
+            };
+            auto* wp = new wrapper_t{this, std::move(fn)};
+
+            pthread_attr_t attr;
+            pthread_attr_init(&attr);
+            pthread_attr_setstacksize(&attr, stack_size_);
+            pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+
+            pthread_t tid;
+            int rc = pthread_create(&tid, &attr, [](void* arg) -> void* {
+                auto* w = static_cast<wrapper_t*>(arg);
+                try { w->fn(); } catch (...) {}
+                elastic_task_queue* q = w->q;
+                delete w;
+                std::lock_guard<std::mutex> lk(q->m_);
+                if (--q->active_ == 0 && q->shutdown_) q->cv_.notify_all();
+                return nullptr;
+            }, wp);
+            pthread_attr_destroy(&attr);
+
+            if (rc != 0) {
+                // pthread_create failed; undo counter increment and free wrapper
+                delete wp;
+                std::lock_guard<std::mutex> lk(m_);
+                if (--active_ == 0 && shutdown_) cv_.notify_all();
+                return false;
+            }
+#endif
             return true;
         }
 
         void shutdown() override {
-            {
-                std::lock_guard<std::mutex> lk(m_);
-                shutdown_ = true;
-            }
             std::unique_lock<std::mutex> lk(m_);
+            if (shutdown_) {
+                // Already shutting down — just wait for active tasks to finish
+                cv_.wait(lk, [this] { return active_ == 0; });
+                return;
+            }
+            shutdown_ = true;
+            // Wait under the same lock so we cannot miss the notify from the
+            // last worker thread (eliminates the double-lock race window).
             cv_.wait(lk, [this] { return active_ == 0; });
         }
 
