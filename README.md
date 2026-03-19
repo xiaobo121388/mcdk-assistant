@@ -1,8 +1,13 @@
 # MCDK-ASSISTANT
 
-面向 NetEase Minecraft / Bedrock 开发场景的通用 MCP Server，基于 C++20 构建。
+面向 NetEase Minecraft / Bedrock 开发场景的通用 MCP Server，基于 `C++20` 构建。
 
 聚合文档检索、原版资源搜索、JSON UI 分析、模型/动画编辑与像素画处理等能力，使 AI 能以更工程化的方式参与 Minecraft 开发流程。
+
+## 生态项目
+- [QuMod](http://qumod.cc)：QuMod 主站点，汇总文档、资源、项目动态与相关内容
+- [MCDK](https://github.com/GitHub-Zero123/MCDevTool)：轻量化网易 MOD 开发调试工具，支持后端内核与 VS Code 插件两种形态
+- [MCDevTools for VSCode](https://marketplace.visualstudio.com/items?itemName=dofes.mcdev-tools)：MCDK 的 VS Code 插件形态，便于在编辑器内完成调试与开发辅助
 
 ## ✨ 核心能力
 
