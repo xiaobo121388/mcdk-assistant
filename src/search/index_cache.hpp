@@ -1,6 +1,7 @@
 #pragma once
 
 #include "search/bm25.hpp"
+#include "common/path_utils.hpp"
 #include <string>
 #include <vector>
 #include <fstream>
@@ -23,8 +24,8 @@ public:
     static constexpr char     MAGIC[8] = {'M','C','D','K','I','D','X','\0'};
     static constexpr uint32_t VERSION  = 5;
 
-    // ── Fingerprint：只读几个子目录的 mtime，< 1ms ──
-    static std::string compute_fingerprint(const std::string& knowledge_dir) {
+    // 指纹只看几个高价值目录的 mtime，避免每次启动全量扫描文件元数据。
+    static std::string compute_fingerprint(const std::filesystem::path& knowledge_dir) {
         namespace fs = std::filesystem;
         static const char* WATCH[] = {
             "ModAPI", "BedrockWiki", "NeteaseGuide", "QuModDocs",
@@ -32,7 +33,7 @@ public:
         };
         uint64_t hash = 14695981039346656037ULL;
         for (const auto* sub : WATCH) {
-            fs::path p = fs::path(knowledge_dir) / sub;
+            fs::path p = knowledge_dir / sub;
             std::string s = std::string(sub) + ":";
             if (fs::exists(p)) {
                 s += std::to_string(fs::last_write_time(p).time_since_epoch().count());
@@ -74,7 +75,6 @@ public:
         std::vector<GameAssetData> game_assets;  // bp, rp
     };
 
-    // ── 保存接口 ──
     struct CatIndexRef {
         const std::vector<DocFragment>*                 fragments;
         const std::vector<std::vector<std::string>>*    tokenized_docs;
@@ -87,28 +87,26 @@ public:
         const BM25Engine*                               engine;
     };
 
-    static bool save(const std::string& cache_path,
+    static bool save(const std::filesystem::path& cache_path,
                      const std::string& fingerprint,
                      const std::vector<CatIndexRef>&  cat_refs,
                      const std::vector<GameIndexRef>& ga_refs)
     {
-        // ── 修复③：流式写文件，无需预分配大 buffer ──
-        // 使用 64KB 写缓冲区，通过 setvbuf 减少系统调用次数
-        FILE* fp = std::fopen(cache_path.c_str(), "wb");
+        // 这里仍用 C stdio，主要是为了保持序列化实现简单且可控。
+        std::string cache_path_text = mcdk::path::to_utf8(cache_path);
+        FILE* fp = std::fopen(cache_path_text.c_str(), "wb");
         if (!fp) {
-            std::cerr << "[MCDK] cache: cannot open for writing: " << cache_path << std::endl;
+            std::cerr << "[MCDK] cache: cannot open for writing: " << cache_path_text << std::endl;
             return false;
         }
         static constexpr size_t WRITE_BUF = 64 * 1024;
         char wbuf[WRITE_BUF];
         std::setvbuf(fp, wbuf, _IOFBF, WRITE_BUF);
 
-        // Header
         std::fwrite(MAGIC, 1, 8, fp);
         write_u32(fp, VERSION);
         write_string(fp, fingerprint);
 
-        // Categories
         write_u32(fp, static_cast<uint32_t>(cat_refs.size()));
         for (const auto& r : cat_refs) {
             write_fragments(fp, *r.fragments);
@@ -116,7 +114,6 @@ public:
             write_bm25(fp, *r.engine);
         }
 
-        // GameAssets（只存 rel_path，不再存 content）
         write_u32(fp, static_cast<uint32_t>(ga_refs.size()));
         for (const auto& r : ga_refs) {
             write_u32(fp, static_cast<uint32_t>(r.rel_paths->size()));
@@ -128,61 +125,54 @@ public:
         }
 
         bool ok = std::fflush(fp) == 0 && std::ferror(fp) == 0;
-        // 获取写入大小用于日志
         long written = std::ftell(fp);
         std::fclose(fp);
         if (ok && written > 0) {
             std::cout << "[MCDK] cache: saved " << (written / 1024 / 1024)
-                      << " MB to " << cache_path << std::endl;
+                      << " MB to " << cache_path_text << std::endl;
             return true;
         }
         std::cerr << "[MCDK] cache: write error" << std::endl;
         return false;
     }
 
-    // ── 修复②：流式 fread 解析，消除整块读入的双倍峰值内存 ──
-    // skip_fingerprint_check: 仅缓存模式时跳过 fingerprint 校验
-    static bool load(const std::string& cache_path,
+    static bool load(const std::filesystem::path& cache_path,
                      const std::string& expected_fp,
                      CacheData& out,
                      bool skip_fingerprint_check = false)
     {
-        FILE* fp = std::fopen(cache_path.c_str(), "rb");
+        // cache-only 模式会跳过 fingerprint 校验，其它模式仍要求目录指纹一致。
+        std::string cache_path_text = mcdk::path::to_utf8(cache_path);
+        FILE* fp = std::fopen(cache_path_text.c_str(), "rb");
         if (!fp) return false;
 
-        // 设置 64KB 读缓冲区，减少系统调用次数
         static constexpr size_t READ_BUF = 64 * 1024;
         char rbuf[READ_BUF];
         std::setvbuf(fp, rbuf, _IOFBF, READ_BUF);
 
-        // 快速检查文件大小
         std::fseek(fp, 0, SEEK_END);
         long fsize = std::ftell(fp);
         std::fseek(fp, 0, SEEK_SET);
         if (fsize < 16) { std::fclose(fp); return false; }
 
-        // Magic
         char magic[8];
         if (std::fread(magic, 1, 8, fp) != 8 || std::memcmp(magic, MAGIC, 8) != 0) {
             std::cerr << "[MCDK] cache: bad magic" << std::endl;
             std::fclose(fp); return false;
         }
 
-        // Version
         uint32_t ver = fread_u32(fp);
         if (ver != VERSION) {
             std::cout << "[MCDK] cache: version " << ver << " != " << VERSION << ", rebuilding" << std::endl;
             std::fclose(fp); return false;
         }
 
-        // Fingerprint
         out.fingerprint = fread_string(fp);
         if (!skip_fingerprint_check && out.fingerprint != expected_fp) {
             std::cout << "[MCDK] cache: fingerprint mismatch, rebuilding" << std::endl;
             std::fclose(fp); return false;
         }
 
-        // Categories
         uint32_t cat_n = fread_u32(fp);
         out.categories.resize(cat_n);
         for (uint32_t i = 0; i < cat_n; ++i) {
@@ -191,7 +181,6 @@ public:
             if (!fread_bm25(fp, out.categories[i].bm25)) { std::fclose(fp); return false; }
         }
 
-        // GameAssets
         uint32_t ga_n = fread_u32(fp);
         out.game_assets.resize(ga_n);
         for (uint32_t i = 0; i < ga_n; ++i) {

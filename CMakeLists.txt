@@ -10,172 +10,111 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
     if(MSVC)
         add_compile_options(/utf-8 /EHsc)
-        # 使用MT链接运行库
         set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     endif()
 endif()
 
-# ── 依赖 ──────────────────────────────────────────────
-
-# nlohmann/json (本地单头文件)
+# 内部依赖库
 add_library(nlohmann_json INTERFACE)
 add_library(nlohmann_json::nlohmann_json ALIAS nlohmann_json)
 target_include_directories(nlohmann_json INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/libs/nlohmann
 )
 
-# Threads
 find_package(Threads REQUIRED)
 
-# cpp-mcp
 add_subdirectory(libs/cpp-mcp)
 target_link_libraries(mcp PUBLIC nlohmann_json::nlohmann_json)
 
-# cppjieba (header-only, 手动设置 include)
 add_library(cppjieba INTERFACE)
 target_include_directories(cppjieba INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/libs/cppjieba/include
     ${CMAKE_CURRENT_SOURCE_DIR}/libs/cppjieba/deps/limonp/include
 )
 
-# stb (header-only, 像素画模块依赖)
 add_library(stb INTERFACE)
 target_include_directories(stb INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/libs/stb
 )
 
-# ── 主程序（完整版）─────────────────────────────────────
-
 file(GLOB_RECURSE MCDK_SOURCES
     src/*.cpp
 )
 
-add_executable(${PROJECT_NAME} ${MCDK_SOURCES})
-
-target_include_directories(${PROJECT_NAME} PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-
-target_link_libraries(${PROJECT_NAME} PRIVATE
-    mcp
-    cppjieba
-    stb
-    nlohmann_json::nlohmann_json
-    Threads::Threads
-)
-
-if(WIN32)
-    target_link_libraries(${PROJECT_NAME} PRIVATE ws2_32)
-endif()
-
-# ── Linux 编译警告抑制 ──────────────────────────────────
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID)
-    target_compile_options(${PROJECT_NAME} PRIVATE
-        -Wno-deprecated-declarations
-        -Wno-unused-result
-    )
-endif()
-
-# ── Linux 静态链接 libstdc++/libgcc/libm（保持 libc 动态以兼容 glibc）──
-# 在 ECS 等生产环境部署时无需安装额外运行时，二进制可直接运行
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID)
-    target_link_options(${PROJECT_NAME} PRIVATE
-        -static-libstdc++
-        -static-libgcc
-        # libm/libpthread 通过 -Wl 静态优先链接
-        -Wl,-Bstatic -lm
-        -Wl,-Bdynamic   # 后续 libc/ld 保持动态
-    )
-endif()
-
-# ── Lite 版（仅资料库搜索 + 网易差异工具）────────────
-
 set(MCDK_LITE_SOURCES
     src/main.cpp
+    src/app/runtime_paths.cpp
+    src/app/server_runtime.cpp
 )
 
-add_executable(mcdk-asst-lite ${MCDK_LITE_SOURCES})
-
-target_compile_definitions(mcdk-asst-lite PRIVATE MCDK_LITE)
-
-target_include_directories(mcdk-asst-lite PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-
-target_link_libraries(mcdk-asst-lite PRIVATE
-    mcp
-    cppjieba
-    nlohmann_json::nlohmann_json
-    Threads::Threads
-)
-
-if(WIN32)
-    target_link_libraries(mcdk-asst-lite PRIVATE ws2_32)
-endif()
-
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID)
-    target_compile_options(mcdk-asst-lite PRIVATE
-        -Wno-deprecated-declarations
-        -Wno-unused-result
-    )
-endif()
-
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID)
-    target_link_options(mcdk-asst-lite PRIVATE
-        -static-libstdc++
-        -static-libgcc
-        -Wl,-Bstatic -lm
-        -Wl,-Bdynamic
-    )
-endif()
-
-# ── Server 版（Linux 服务器部署，启用统计功能）─────────
-# 仅在 Linux 上构建，定义 MCDK_SERVER 宏
-# 特性：
-#   - 监听 0.0.0.0:18766（MCP）
-#   - 独立 HTTP 端口 18767 暴露 GET /api/tool-stats（工具调用统计）
-#   - 统计数据持久化到 <exe_dir>/datas/tool_stats.json，每 30 分钟写盘
-
-if(NOT ANDROID)
-    file(GLOB_RECURSE MCDK_SERVER_SOURCES src/*.cpp)
-
-    add_executable(mcdk-asst-server ${MCDK_SERVER_SOURCES})
-
-    # Server 版同时定义 MCDK_LITE，屏蔽像素画/模型/动画等需要本地文件系统的高风险工具
-    target_compile_definitions(mcdk-asst-server PRIVATE MCDK_SERVER MCDK_LITE)
-
-    target_include_directories(mcdk-asst-server PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-    )
-
-    # Server 版同时定义 MCDK_LITE，不编译像素画/模型/动画模块，无需 stb
-    target_link_libraries(mcdk-asst-server PRIVATE
-        mcp
-        cppjieba
-        nlohmann_json::nlohmann_json
-        Threads::Threads
-    )
-
+# 平台处理函数封装
+function(mcdk_apply_platform_options target_name)
     if(WIN32)
-        target_link_libraries(mcdk-asst-server PRIVATE ws2_32)
+        target_link_libraries(${target_name} PRIVATE ws2_32)
     endif()
 
-    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-        target_compile_options(mcdk-asst-server PRIVATE
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID)
+        target_compile_options(${target_name} PRIVATE
             -Wno-deprecated-declarations
             -Wno-unused-result
         )
-
-        target_link_options(mcdk-asst-server PRIVATE
+        target_link_options(${target_name} PRIVATE
             -static-libstdc++
             -static-libgcc
             -Wl,-Bstatic -lm
             -Wl,-Bdynamic
         )
     endif()
-endif()
+endfunction()
 
-# ── 安装 ──────────────────────────────────────────────
+# 添加目标函数封装
+function(mcdk_add_target target_name)
+    set(options WITH_STB)
+    set(oneValueArgs)
+    set(multiValueArgs SOURCES DEFINITIONS)
+    cmake_parse_arguments(MCDK_TARGET "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+
+    add_executable(${target_name} ${MCDK_TARGET_SOURCES})
+    target_include_directories(${target_name} PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    target_link_libraries(${target_name} PRIVATE
+        mcp
+        cppjieba
+        nlohmann_json::nlohmann_json
+        Threads::Threads
+    )
+
+    if(MCDK_TARGET_WITH_STB)
+        target_link_libraries(${target_name} PRIVATE stb)
+    endif()
+
+    if(MCDK_TARGET_DEFINITIONS)
+        target_compile_definitions(${target_name} PRIVATE ${MCDK_TARGET_DEFINITIONS})
+    endif()
+
+    mcdk_apply_platform_options(${target_name})
+endfunction()
+
+mcdk_add_target(${PROJECT_NAME}
+    WITH_STB
+    SOURCES ${MCDK_SOURCES}
+)
+
+# LITE版最简分发（不提供任何涉及文件操作的敏感行为内容）
+mcdk_add_target(mcdk-asst-lite
+    SOURCES ${MCDK_LITE_SOURCES}
+    DEFINITIONS MCDK_LITE
+)
+
+if(NOT ANDROID)
+    file(GLOB_RECURSE MCDK_SERVER_SOURCES src/*.cpp)
+    # 服务器默认LITE模式，避免暴露过多文件操作接口
+    mcdk_add_target(mcdk-asst-server
+        SOURCES ${MCDK_SERVER_SOURCES}
+        DEFINITIONS MCDK_SERVER MCDK_LITE
+    )
+endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID)
     install(TARGETS ${PROJECT_NAME} mcdk-asst-lite mcdk-asst-server RUNTIME DESTINATION .)
@@ -184,8 +123,6 @@ else()
 endif()
 install(DIRECTORY dicts/ DESTINATION dicts)
 install(DIRECTORY knowledge/ DESTINATION knowledge)
-
-# ── 测试 ──────────────────────────────────────────────
 
 option(MCDK_BUILD_TESTS "Build test executables" OFF)
 if(MCDK_BUILD_TESTS)

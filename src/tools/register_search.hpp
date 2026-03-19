@@ -12,6 +12,8 @@
 #include <string>
 #include <vector>
 
+#include "common/path_utils.hpp"
+
 namespace mcdk {
 
 using SearchFn = std::vector<SearchResult>(SearchService::*)(const std::string&, int) const;
@@ -34,8 +36,7 @@ inline mcp::json handle_search(SearchService& svc, SearchFn fn, const mcp::json&
 }
 
 inline void register_search_tools(mcp::server& srv, SearchService& search_svc,
-                                   const std::string& knowledge_dir = "") {
-    // ── 批量搜索工具 ──────────────────────────────────
+                                   const std::filesystem::path& knowledge_dir = {}) {
     struct ToolDef { const char* name; const char* desc; SearchFn fn; };
     static const ToolDef tools[] = {
         {"search_api",           "搜索 ModAPI 接口文档",
@@ -69,7 +70,6 @@ inline void register_search_tools(mcp::server& srv, SearchService& search_svc,
             });
     }
 
-    // ── search_game_assets（有额外 scope 参数）────────
     {
         auto tool = mcp::tool_builder("search_game_assets")
             .with_description(
@@ -99,7 +99,6 @@ inline void register_search_tools(mcp::server& srv, SearchService& search_svc,
             });
     }
 
-    // ── read_knowledge ────────────────────────────────
     {
         auto tool = mcp::tool_builder("read_knowledge")
             .with_description("读取 knowledge 目录下的指定文件内容，搜索结果中的 file 字段可直接作为 path 参数传入")
@@ -123,9 +122,8 @@ inline void register_search_tools(mcp::server& srv, SearchService& search_svc,
                 if (ls < 1) ls = 1;
                 if (le < ls) le = ls;
 
-                // 优先尝试从磁盘读取
                 if (!knowledge_dir.empty()) {
-                    auto full = std::filesystem::path(knowledge_dir) / std::filesystem::u8path(rel);
+                    auto full = knowledge_dir / mcdk::path::from_utf8(rel);
                     std::ifstream ifs(full);
                     if (ifs.is_open()) {
                         std::string result, line; int cur = 0;
@@ -142,7 +140,6 @@ inline void register_search_tools(mcp::server& srv, SearchService& search_svc,
                     }
                 }
 
-                // 回退到从缓存的 fragments 中读取
                 auto cached_result = search_svc.read_cached_file(rel, ls, le);
                 if (!cached_result.found)
                     throw mcp::mcp_exception(mcp::error_code::invalid_params, "file not found: " + rel);
@@ -155,7 +152,6 @@ inline void register_search_tools(mcp::server& srv, SearchService& search_svc,
             });
     }
 
-    // ── list_knowledge ────────────────────────────────
     {
         auto tool = mcp::tool_builder("list_knowledge")
             .with_description("列出 knowledge 目录下指定路径的文件和文件夹列表")
@@ -169,14 +165,12 @@ inline void register_search_tools(mcp::server& srv, SearchService& search_svc,
                 if (rel.find("..") != std::string::npos)
                     throw mcp::mcp_exception(mcp::error_code::invalid_params, "path must not contain '..'");
 
-                // 优先尝试从磁盘列举
                 if (!knowledge_dir.empty()) {
-                    fs::path dir = fs::path(knowledge_dir) / (rel.empty() ? fs::path() : fs::u8path(rel));
+                    fs::path dir = knowledge_dir / (rel.empty() ? fs::path() : mcdk::path::from_utf8(rel));
                     if (fs::exists(dir) && fs::is_directory(dir)) {
                         mcp::json dirs = mcp::json::array(), files = mcp::json::array();
                         for (const auto& entry : fs::directory_iterator(dir)) {
-                            auto u = entry.path().filename().u8string();
-                            std::string s(reinterpret_cast<const char*>(u.data()), u.size());
+                            std::string s = mcdk::path::filename_to_utf8(entry.path());
                             if (entry.is_directory()) dirs.push_back(s);
                             else files.push_back(s);
                         }
@@ -187,7 +181,6 @@ inline void register_search_tools(mcp::server& srv, SearchService& search_svc,
                     }
                 }
 
-                // 回退到从缓存的 fragments 中列举
                 auto cached_list = search_svc.list_cached_files(rel);
                 if (!cached_list.found)
                     throw mcp::mcp_exception(mcp::error_code::invalid_params, "directory not found: " + rel);

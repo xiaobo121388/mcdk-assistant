@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common/path_utils.hpp"
 #include "search/bm25.hpp"
 #include "search/index_cache.hpp"
 #include <cppjieba/Jieba.hpp>
@@ -22,53 +23,59 @@
 
 namespace mcdk {
 
-// 文档分类（基于路径子目录）
 enum class DocCategory { Unknown, API, Event, Enum, Beta, Wiki, QuMod, NeteaseGuide };
 
 class SearchService {
 public:
-    // 完整模式：提供词典目录 + 知识库目录 + 可选缓存路径
-    SearchService(const std::string& dicts_dir, const std::string& knowledge_dir,
-                  const std::string& cache_path = "")
+    // 正常模式：词典、知识库、缓存都来自磁盘目录。
+    SearchService(const std::filesystem::path& dicts_dir,
+                  const std::filesystem::path& knowledge_dir,
+                  const std::filesystem::path& cache_path = {})
         : jieba_(std::make_unique<cppjieba::Jieba>(
-            dicts_dir + "/jieba.dict.utf8",
-            dicts_dir + "/hmm_model.utf8",
-            dicts_dir + "/user.dict.utf8",
-            dicts_dir + "/idf.utf8",
-            dicts_dir + "/stop_words.utf8"
+            mcdk::path::to_utf8(dicts_dir / "jieba.dict.utf8"),
+            mcdk::path::to_utf8(dicts_dir / "hmm_model.utf8"),
+            mcdk::path::to_utf8(dicts_dir / "user.dict.utf8"),
+            mcdk::path::to_utf8(dicts_dir / "idf.utf8"),
+            mcdk::path::to_utf8(dicts_dir / "stop_words.utf8")
           ))
         , knowledge_dir_(knowledge_dir)
         , cache_path_(cache_path)
         , cache_only_mode_(false)
     {
-        load_stop_words(dicts_dir + "/stop_words.utf8");
+        this->load_stop_words(dicts_dir / "stop_words.utf8");
         init_indices();
     }
 
-    // 仅缓存模式：提供词典目录和缓存文件路径，无需知识库目录
-    SearchService(const std::string& dicts_dir, const std::string& cache_path, bool cache_only)
+    // cache-only 模式保留搜索能力，但不再要求 knowledge 目录存在。
+    SearchService(const std::filesystem::path& dicts_dir,
+                  const std::filesystem::path& cache_path,
+                  bool cache_only)
         : jieba_(std::make_unique<cppjieba::Jieba>(
-            dicts_dir + "/jieba.dict.utf8",
-            dicts_dir + "/hmm_model.utf8",
-            dicts_dir + "/user.dict.utf8",
-            dicts_dir + "/idf.utf8",
-            dicts_dir + "/stop_words.utf8"
+            mcdk::path::to_utf8(dicts_dir / "jieba.dict.utf8"),
+            mcdk::path::to_utf8(dicts_dir / "hmm_model.utf8"),
+            mcdk::path::to_utf8(dicts_dir / "user.dict.utf8"),
+            mcdk::path::to_utf8(dicts_dir / "idf.utf8"),
+            mcdk::path::to_utf8(dicts_dir / "stop_words.utf8")
           ))
         , cache_path_(cache_path)
         , cache_only_mode_(cache_only)
     {
-        load_stop_words(dicts_dir + "/stop_words.utf8");
+        this->load_stop_words(dicts_dir / "stop_words.utf8");
         init_indices();
     }
 
-    // 是否为仅缓存模式（无磁盘知识库目录）
     bool is_cache_only_mode() const { return cache_only_mode_; }
 
     std::vector<SearchResult> search_api(const std::string& keyword, int top_k = -1) const {
         return search_category(api_index_, keyword, top_k);
     }
     std::vector<SearchResult> search_event(const std::string& keyword, int top_k = -1) const {
-        return search_category(event_index_, keyword, top_k);
+        auto results = search_category(event_index_, keyword, top_k);
+        if (!results.empty()) return results;
+
+        // 事件文档里大量事件名/接口名/英文 token 使用 ASCII 词形，
+        // 纯中文分词路径在部分关键词上可能完全失配，因此回退一次英文分词检索。
+        return search_category_en(event_index_, keyword, top_k);
     }
     std::vector<SearchResult> search_enum(const std::string& keyword, int top_k = -1) const {
         return search_category(enum_index_, keyword, top_k);
@@ -77,22 +84,32 @@ public:
         return search_category(netease_guide_index_, keyword, top_k);
     }
     std::vector<SearchResult> search_all(const std::string& keyword, int top_k = -1) const {
-        auto a = search_category(api_index_, keyword, -1);
-        auto b = search_category(event_index_, keyword, -1);
-        auto c = search_category(enum_index_, keyword, -1);
-        auto d = search_category_en(wiki_index_, keyword, -1);
-        auto e = search_category(qumod_index_, keyword, -1);
-        auto f = search_category(netease_guide_index_, keyword, -1);
-        a.insert(a.end(), b.begin(), b.end());
-        a.insert(a.end(), c.begin(), c.end());
-        a.insert(a.end(), d.begin(), d.end());
-        a.insert(a.end(), e.begin(), e.end());
-        a.insert(a.end(), f.begin(), f.end());
-        std::sort(a.begin(), a.end(), [](const SearchResult& x, const SearchResult& y) {
-            return x.score > y.score;
+        // 聚合搜索必须限制每个分区的候选数，否则高频词会把所有分区全量结果拼接，
+        // 导致响应体过大甚至表现为无响应。
+        const int per_bucket_k = top_k > 0 ? std::max(top_k * 3, 30) : 60;
+
+        auto a = search_category(api_index_, keyword, per_bucket_k);
+        auto b = search_event(keyword, per_bucket_k);
+        auto c = search_category(enum_index_, keyword, per_bucket_k);
+        auto d = search_category_en(wiki_index_, keyword, per_bucket_k);
+        auto e = search_category(qumod_index_, keyword, per_bucket_k);
+        auto f = search_category(netease_guide_index_, keyword, per_bucket_k);
+
+        std::vector<SearchResult> merged;
+        merged.reserve(a.size() + b.size() + c.size() + d.size() + e.size() + f.size());
+        merged.insert(merged.end(), a.begin(), a.end());
+        merged.insert(merged.end(), b.begin(), b.end());
+        merged.insert(merged.end(), c.begin(), c.end());
+        merged.insert(merged.end(), d.begin(), d.end());
+        merged.insert(merged.end(), e.begin(), e.end());
+        merged.insert(merged.end(), f.begin(), f.end());
+
+        std::sort(merged.begin(), merged.end(), [](const SearchResult& x, const SearchResult& y) {
+            return x.score != y.score ? x.score > y.score : x.fragment->file < y.fragment->file;
         });
-        if (top_k > 0 && static_cast<size_t>(top_k) < a.size()) a.resize(top_k);
-        return a;
+
+        if (top_k > 0 && static_cast<size_t>(top_k) < merged.size()) merged.resize(static_cast<size_t>(top_k));
+        return merged;
     }
     std::vector<SearchResult> search_wiki(const std::string& keyword, int top_k = -1) const {
         return search_category_en(wiki_index_, keyword, top_k);
@@ -107,8 +124,6 @@ public:
              + qumod_index_.engine.doc_count() + netease_guide_index_.engine.doc_count();
     }
 
-    // ── 从缓存的 fragments 中读取文件内容（供仅缓存模式下的 read_knowledge 使用）──
-    // 返回: {content, total_lines}，file 未找到时 content 为空
     struct FileReadResult {
         std::string content;
         int         total_lines = 0;
@@ -117,8 +132,6 @@ public:
 
     FileReadResult read_cached_file(const std::string& rel_path, int line_start = 1, int line_end = INT_MAX) const {
         FileReadResult result;
-        // 合并所有 fragments 的内容（同一 file 可能有多个 fragment）
-        // 先收集所有来源
         std::string full_content;
         bool found = false;
 
@@ -138,7 +151,6 @@ public:
         collect(qumod_index_);
         collect(netease_guide_index_);
 
-        // 也搜索 GameAssets 的 fragments
         auto collect_ga = [&](const GameAssetIndex& idx) {
             for (const auto& frag : idx.fragments) {
                 if (frag.file == rel_path) {
@@ -154,7 +166,6 @@ public:
 
         result.found = true;
 
-        // 按行切割并提取指定范围
         std::istringstream iss(full_content);
         std::string line;
         int cur = 0;
@@ -172,7 +183,6 @@ public:
         return result;
     }
 
-    // ── 从缓存的 fragments 中列出文件/目录（供仅缓存模式下的 list_knowledge 使用）──
     struct ListResult {
         std::vector<std::string> dirs;
         std::vector<std::string> files;
@@ -183,7 +193,6 @@ public:
         ListResult result;
         std::set<std::string> dir_set, file_set;
 
-        // 规范化路径：确保以 / 结尾（用于前缀匹配），空路径表示根目录
         std::string prefix = rel_path;
         if (!prefix.empty()) {
             for (auto& c : prefix) if (c == '\\') c = '/';
@@ -193,11 +202,8 @@ public:
         auto collect = [&](const std::vector<DocFragment>& frags) {
             for (const auto& frag : frags) {
                 const std::string& file = frag.file;
-                // 检查是否在指定目录下
                 if (!prefix.empty() && file.find(prefix) != 0) continue;
-                // 取相对于 prefix 的部分
                 std::string remainder = file.substr(prefix.size());
-                // 找第一个 /，判断是子目录还是直接文件
                 auto slash_pos = remainder.find('/');
                 if (slash_pos != std::string::npos) {
                     dir_set.insert(remainder.substr(0, slash_pos));
@@ -216,7 +222,6 @@ public:
         collect(game_assets_bp_.fragments);
         collect(game_assets_rp_.fragments);
 
-        // 也从 GameAssets 的 path_entries 收集（因为 fragments 可能只保存了部分内容）
         auto collect_ga_paths = [&](const GameAssetIndex& idx) {
             for (const auto& entry : idx.path_entries) {
                 const std::string& file = entry.first;
@@ -245,36 +250,27 @@ public:
         double      score;
     };
 
-    // 默认 top_k=200，防止 20000 个文件全量返回导致超时
     static constexpr int DEFAULT_GAME_ASSET_TOP_K = 200;
 
     std::vector<AssetResult> search_game_assets(const std::string& keyword, int scope, int top_k = -1) const {
-        // 无上限时使用默认上限，避免大量文件返回导致超时
         const int effective_top_k = (top_k > 0) ? top_k : DEFAULT_GAME_ASSET_TOP_K;
 
         std::vector<std::string> tokens;
         tokenize_en(keyword, tokens);
         if (tokens.empty()) return {};
 
-        // 预处理：小写关键词和每个 token
         std::string kw_lower = keyword;
         for (auto& c : kw_lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-
-        // tokens 已经是 lowercase（tokenize_en 里做了 tolower）
 
         const GameAssetIndex* idx_bp = (scope == 0 || scope == 1) ? &game_assets_bp_ : nullptr;
         const GameAssetIndex* idx_rp = (scope == 0 || scope == 2) ? &game_assets_rp_ : nullptr;
 
-        // 用 doc_id 为 key 的稀疏 map，避免 string hash 开销
-        // 路径匹配分和 BM25 内容分分开汇总，最后合并
         std::unordered_map<std::string, double>      score_map;
         std::unordered_map<std::string, std::string> snippet_map;
         score_map.reserve(512);
         snippet_map.reserve(512);
 
-        // BM25 内容搜索（倒排，只命中文档才进 score_map）
         auto collect_bm25 = [&](const GameAssetIndex& idx) {
-            // 传 effective_top_k*4 做内部预限制，避免无上限全量排序
             auto bm25_results = idx.engine.search(tokens, effective_top_k * 4);
             for (const auto& r : bm25_results) {
                 const std::string& path = r.fragment->file;
@@ -289,26 +285,20 @@ public:
         if (idx_bp) collect_bm25(*idx_bp);
         if (idx_rp) collect_bm25(*idx_rp);
 
-        // 路径名匹配：只对路径字符串做 find，不读取文件内容
-        // entries.second 不再使用（content 已在 fragments 中），避免额外内存访问
         auto add_path_score = [&](const GameAssetIndex& idx) {
             for (const auto& entry : idx.path_entries) {
-                // entry 只包含 (rel_path, rel_path_lower)
                 const std::string& rel       = entry.first;
                 const std::string& rel_lower = entry.second;
 
                 double path_score = 0.0;
-                // 精确子串匹配整个关键词（高权重）
                 if (!kw_lower.empty() && rel_lower.find(kw_lower) != std::string::npos)
                     path_score += 10.0;
-                // 逐 token 匹配（中等权重）
                 for (const auto& tok : tokens) {
                     if (!tok.empty() && rel_lower.find(tok) != std::string::npos)
                         path_score += 3.0;
                 }
                 if (path_score > 0.0) {
                     score_map[rel] += path_score;
-                    // snippet 只从已有 BM25 结果中取，路径命中不读内容
                 }
             }
         };
@@ -325,7 +315,6 @@ public:
             results.push_back({path, std::move(snip), score});
         }
 
-        // 用 partial_sort 只排前 effective_top_k 个
         if (static_cast<size_t>(effective_top_k) < results.size()) {
             std::partial_sort(results.begin(),
                               results.begin() + effective_top_k,
@@ -354,16 +343,15 @@ private:
     };
 
     struct GameAssetIndex {
-        // 轻量路径表：只存 (rel_path, rel_path_lower)，不再存文件内容副本
-        std::vector<std::pair<std::string,std::string>> path_entries;  // (rel_path, rel_path_lower)
+        std::vector<std::pair<std::string,std::string>> path_entries;
         std::vector<DocFragment>                        fragments;
         std::vector<std::vector<std::string>>           tokenized_docs;
         BM25Engine                                      engine;
     };
 
-    std::unique_ptr<cppjieba::Jieba> jieba_;       // 仅缓存模式下为 nullptr
-    std::string                     knowledge_dir_;
-    std::string                     cache_path_;
+    std::unique_ptr<cppjieba::Jieba> jieba_;
+    std::filesystem::path           knowledge_dir_;
+    std::filesystem::path           cache_path_;
     bool                            cache_only_mode_ = false;
     std::unordered_set<std::string> stop_words_;
     CategoryIndex                   api_index_;
@@ -375,10 +363,8 @@ private:
     GameAssetIndex                  game_assets_bp_;
     GameAssetIndex                  game_assets_rp_;
 
-    // ── 初始化入口 ──
     void init_indices() {
         if (cache_only_mode_) {
-            // 仅缓存模式：直接从 .bin 加载，跳过 fingerprint 校验
             if (cache_path_.empty()) {
                 std::cerr << "[MCDK] cache-only mode: no cache path provided" << std::endl;
                 return;
@@ -388,12 +374,13 @@ private:
                 std::cout << "[MCDK] 缓存模式：从缓存文件恢复索引..." << std::endl;
                 restore_from_cache(std::move(cached));
             } else {
-                std::cerr << "[MCDK] 缓存模式：缓存文件加载失败: " << cache_path_ << std::endl;
+                std::cerr << "[MCDK] 缓存模式：缓存文件加载失败: " << mcdk::path::to_utf8(cache_path_) << std::endl;
             }
             return;
         }
 
         if (!cache_path_.empty()) {
+            // 有缓存时优先走恢复路径，避免每次启动都重新构建 BM25。
             std::string fp = IndexCache::compute_fingerprint(knowledge_dir_);
             std::cout << "[MCDK] knowledge fingerprint: " << fp << std::endl;
 
@@ -412,7 +399,6 @@ private:
         if (!cache_path_.empty()) {
             save_cache();  // save_cache() 内部已释放 tokenized_docs
         } else {
-            // 无缓存路径时同样释放 tokenized_docs，运行时搜索不需要它
             auto free_td = [](CategoryIndex& idx) {
                 std::vector<std::vector<std::string>>().swap(idx.tokenized_docs);
             };
@@ -431,17 +417,14 @@ private:
         }
     }
 
-    // 从缓存直接恢复，完全跳过 build_index()
     void restore_from_cache(IndexCache::CacheData&& cached) {
         auto restore_cat = [](CategoryIndex& idx, IndexCache::CatData& d) {
             idx.fragments = std::move(d.fragments);
-            // restore_index 不再持有 tokenized_docs 指针，传临时引用即可
             idx.engine.restore_index(
                 idx.fragments, d.tokenized_docs,
                 std::move(d.bm25.doc_lengths), d.bm25.avg_dl,
                 std::move(d.bm25.idf), std::move(d.bm25.inverted_index)
             );
-            // restore 完成后立即释放分词数据，运行时搜索不再需要
             std::vector<std::vector<std::string>>().swap(d.tokenized_docs);
         };
 
@@ -457,7 +440,6 @@ private:
         if (cached.game_assets.size() >= 2) {
             auto restore_ga = [](GameAssetIndex& idx, IndexCache::GameAssetData& d) {
                 idx.fragments = std::move(d.fragments);
-                // 重建 path_entries：(rel_path, rel_path_lower)，不再保存内容副本
                 idx.path_entries.resize(d.rel_paths.size());
                 for (size_t i = 0; i < d.rel_paths.size(); ++i) {
                     std::string lower = d.rel_paths[i];
@@ -576,7 +558,7 @@ private:
     }
 
     // ── 分词 ──
-    void load_stop_words(const std::string& path) {
+    void load_stop_words(const std::filesystem::path& path) {
         std::ifstream ifs(path);
         if (!ifs.is_open()) return;
         std::string line;
@@ -611,25 +593,20 @@ private:
         if (!word.empty()) tokens.push_back(std::move(word));
     }
 
-    static std::string path_to_utf8(const std::filesystem::path& p) {
-        auto u8 = p.generic_u8string();
-        return std::string(reinterpret_cast<const char*>(u8.data()), u8.size());
-    }
-
-    // ── 并行加载知识库 ──
     void load_knowledge_parallel() {
         namespace fs = std::filesystem;
         if (!fs::exists(knowledge_dir_)) {
-            std::cerr << "[MCDK] knowledge dir not found: " << knowledge_dir_ << std::endl;
+            std::cerr << "[MCDK] knowledge dir not found: " << mcdk::path::to_utf8(knowledge_dir_) << std::endl;
             return;
         }
 
         std::vector<std::pair<fs::path, std::string>> md_files;
-        std::vector<std::pair<fs::path, std::string>> ga_files;  // (abs, ga_rel)
+        std::vector<std::pair<fs::path, std::string>> ga_files;
 
+        // 先完成路径扫描，再按 Markdown / GameAssets 分开处理，便于后续控制并发策略。
         for (const auto& entry : fs::recursive_directory_iterator(knowledge_dir_)) {
             if (!entry.is_regular_file()) continue;
-            std::string rel_path = path_to_utf8(fs::relative(entry.path(), knowledge_dir_));
+            std::string rel_path = mcdk::path::to_utf8(fs::relative(entry.path(), knowledge_dir_));
 
             if (rel_path.find("GameAssets/") == 0 || rel_path.find("GameAssets\\") == 0) {
                 std::string assets_rel = rel_path.substr(std::string("GameAssets/").size());
@@ -638,7 +615,7 @@ private:
                     ga_files.push_back({entry.path(), assets_rel});
                 continue;
             }
-            auto ext = entry.path().extension().string();
+            auto ext = mcdk::path::to_utf8(entry.path().extension());
             if (ext == ".md" || ext == ".MD")
                 md_files.push_back({entry.path(), rel_path});
         }
@@ -646,7 +623,6 @@ private:
         std::cout << "[MCDK] 扫描完成: " << md_files.size() << " md, "
                   << ga_files.size() << " game asset 文件" << std::endl;
 
-        // 多线程并行读取 GameAssets
         unsigned int nthreads = std::max(1u, std::thread::hardware_concurrency());
         std::cout << "[MCDK] 使用 " << nthreads << " 线程读取 GameAssets..." << std::endl;
 
@@ -669,7 +645,6 @@ private:
                         content = ss.str();
                     }
                     std::string ga_path = "GameAssets/" + assets_rel;
-                    // 预计算小写路径，路径匹配时直接用，避免搜索时重复转换
                     std::string ga_path_lower = ga_path;
                     for (auto& c : ga_path_lower)
                         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -691,7 +666,7 @@ private:
         }
         for (auto& f : futures) f.get();
 
-        // 单线程加载 Markdown（jieba 非线程安全）
+        // jieba 相关分词阶段仍保持单线程，减少额外同步复杂度。
         for (const auto& [abs_path, rel_path] : md_files)
             load_markdown_file(abs_path, rel_path);
 
