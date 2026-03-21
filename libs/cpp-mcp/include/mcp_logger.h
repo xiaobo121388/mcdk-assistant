@@ -113,7 +113,7 @@ namespace mcp {
             #ifdef MCDK_SERVER
             std::cerr << ss.str() << "\n";
             #else
-            std::cout << ss.str() << std::endl;
+            std::cerr << ss.str() << std::endl;
             #endif
         }
 

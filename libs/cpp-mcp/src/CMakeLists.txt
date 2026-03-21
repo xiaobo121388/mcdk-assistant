@@ -15,6 +15,8 @@ add_library(${TARGET} STATIC
     ../include/mcp_tool.h
     mcp_stdio_client.cpp
     ../include/mcp_stdio_client.h
+    mcp_stdio_server.cpp
+    ../include/mcp_stdio_server.h
     mcp_sse_client.cpp
     ../include/mcp_sse_client.h
 )

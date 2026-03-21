@@ -469,6 +469,21 @@ namespace mcp {
          */
         void register_http_post(const std::string& path, httplib::Server::Handler handler);
 
+        /**
+         * @brief Dispatch a single JSON-RPC 2.0 message through the server's handler pipeline.
+         *
+         * Intended for alternative transports (e.g. stdio) that do not use the built-in
+         * HTTP listener.  The server does NOT need to be started (start() not called) for
+         * this to work — tool / resource / method handlers registered beforehand are used
+         * directly.
+         *
+         * @param msg  Parsed JSON-RPC 2.0 object (request or notification).
+         * @param session_id  Logical session identifier chosen by the caller.
+         * @return  The JSON-RPC 2.0 response object, or an empty json object for
+         *          notifications (which require no reply).
+         */
+        json dispatch(const json& msg, const std::string& session_id = "stdio");
+
     private:
         std::string host_;
         int         port_;

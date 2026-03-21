@@ -1207,4 +1207,60 @@ namespace mcp {
         }
     }
 
+    json server::dispatch(const json& msg, const std::string& session_id) {
+        // Ensure default method handlers are registered (tools/list etc.)
+        // We lazily register them the same way start() does, but only once.
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            auto ensure = [this](const std::string& method, method_handler h) {
+                if (method_handlers_.find(method) == method_handlers_.end())
+                    method_handlers_[method] = std::move(h);
+            };
+            ensure("resources/list",           [](const json&, const std::string&) -> json {
+                return json{{"resources", json::array()}};
+            });
+            ensure("resources/templates/list", [](const json&, const std::string&) -> json {
+                return json{{"resourceTemplates", json::array()}};
+            });
+            ensure("prompts/list",             [](const json&, const std::string&) -> json {
+                return json{{"prompts", json::array()}};
+            });
+            ensure("tools/list",               [](const json&, const std::string&) -> json {
+                return json{{"tools", json::array()}};
+            });
+
+            // Ensure the stdio session exists in the dispatcher map so that
+            // session-initialization checks work correctly.
+            if (session_dispatchers_.find(session_id) == session_dispatchers_.end()) {
+                auto disp = std::make_shared<event_dispatcher>();
+                disp->update_activity();
+                session_dispatchers_[session_id] = disp;
+            }
+        }
+
+        // Parse into a request object
+        request req;
+        try {
+            req.jsonrpc = msg.value("jsonrpc", "2.0");
+            req.method  = msg.value("method", "");
+            if (msg.contains("id") && !msg["id"].is_null())
+                req.id = msg["id"];
+            if (msg.contains("params"))
+                req.params = msg["params"];
+        } catch (const std::exception& e) {
+            LOG_ERROR("dispatch: failed to parse message: ", e.what());
+            return response::create_error(
+                json(nullptr), error_code::invalid_request, "Invalid request format"
+            ).to_json();
+        }
+
+        // Notifications: process but return nothing
+        if (req.is_notification()) {
+            process_request(req, session_id);
+            return json(); // empty — caller must not write this to the wire
+        }
+
+        return process_request(req, session_id);
+    }
+
 } // namespace mcp
