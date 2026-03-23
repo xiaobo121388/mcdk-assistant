@@ -67,7 +67,7 @@ LITE 版和完整版支持 `--stdio` 参数，直接以 stdio 传输模式启动
 ```jsonc
 {
   "mcpServers": {
-    "mcdk-assistant": {
+    "mcdk_assistant_stdio": {
       "command": "/path/to/mcdk-asst-lite.exe",
       "args": ["--stdio"],
       "alwaysAllow": ["*"],
@@ -82,7 +82,7 @@ LITE 版和完整版支持 `--stdio` 参数，直接以 stdio 传输模式启动
 ```jsonc
 {
   "mcpServers": {
-    "mcdk-assistant": {
+    "mcdk_assistant_stdio": {
       "command": "/path/to/mcdk-asst-lite.exe",
       "args": ["--stdio"]
     }
