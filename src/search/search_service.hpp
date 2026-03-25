@@ -394,7 +394,7 @@ private:
             }
             IndexCache::CacheData cached;
             if (IndexCache::load(cache_path_, "", cached, /*skip_fingerprint_check=*/true)) {
-                std::cout << "[MCDK] 缓存模式：从缓存文件恢复索引..." << std::endl;
+                std::cerr << "[MCDK] 缓存模式：从缓存文件恢复索引..." << std::endl;
                 restore_from_cache(std::move(cached));
             } else {
                 std::cerr << "[MCDK] 缓存模式：缓存文件加载失败: " << mcdk::path::to_utf8(cache_path_) << std::endl;
@@ -405,17 +405,17 @@ private:
         if (!cache_path_.empty()) {
             // 有缓存时优先走恢复路径，避免每次启动都重新构建 BM25。
             std::string fp = IndexCache::compute_fingerprint(knowledge_dir_);
-            std::cout << "[MCDK] knowledge fingerprint: " << fp << std::endl;
+            std::cerr << "[MCDK] knowledge fingerprint: " << fp << std::endl;
 
             IndexCache::CacheData cached;
             if (IndexCache::load(cache_path_, fp, cached)) {
-                std::cout << "[MCDK] 命中缓存，恢复索引中..." << std::endl;
+                std::cerr << "[MCDK] 命中缓存，恢复索引中..." << std::endl;
                 restore_from_cache(std::move(cached));
                 return;
             }
         }
 
-        std::cout << "[MCDK] 缓存未命中，开始完整构建索引..." << std::endl;
+        std::cerr << "[MCDK] 缓存未命中，开始完整构建索引..." << std::endl;
         load_knowledge_parallel();
         build_indices();
 
@@ -436,7 +436,7 @@ private:
             };
             free_td_ga(game_assets_bp_);
             free_td_ga(game_assets_rp_);
-            std::cout << "[MCDK] tokenized_docs released (no-cache mode)" << std::endl;
+            std::cerr << "[MCDK] tokenized_docs released (no-cache mode)" << std::endl;
         }
     }
 
@@ -486,7 +486,7 @@ private:
         rebuild_event_keyword_entries();
 
         // CacheData 析构时 categories/game_assets 里剩余的临时内存自动释放
-        std::cout << "[MCDK] 缓存恢复完成: " << doc_count() << " fragments, "
+        std::cerr << "[MCDK] 缓存恢复完成: " << doc_count() << " fragments, "
                   << game_assets_count() << " game assets" << std::endl;
     }
 
@@ -536,7 +536,7 @@ private:
         free_tokenized_ga(game_assets_bp_);
         free_tokenized_ga(game_assets_rp_);
 
-        std::cout << "[MCDK] tokenized_docs released after cache save" << std::endl;
+        std::cerr << "[MCDK] tokenized_docs released after cache save" << std::endl;
     }
 
     // ── 搜索辅助 ──
@@ -835,11 +835,11 @@ private:
                 md_files.push_back({entry.path(), rel_path});
         }
 
-        std::cout << "[MCDK] 扫描完成: " << md_files.size() << " md, "
+        std::cerr << "[MCDK] 扫描完成: " << md_files.size() << " md, "
                   << ga_files.size() << " game asset 文件" << std::endl;
 
         unsigned int nthreads = std::max(1u, std::thread::hardware_concurrency());
-        std::cout << "[MCDK] 使用 " << nthreads << " 线程读取 GameAssets..." << std::endl;
+        std::cerr << "[MCDK] 使用 " << nthreads << " 线程读取 GameAssets..." << std::endl;
 
         size_t ga_total = ga_files.size();
         std::mutex bp_mutex, rp_mutex;
@@ -885,7 +885,7 @@ private:
         for (const auto& [abs_path, rel_path] : md_files)
             load_markdown_file(abs_path, rel_path);
 
-        std::cout << "[MCDK] loaded " << doc_count() << " md-fragments, "
+        std::cerr << "[MCDK] loaded " << doc_count() << " md-fragments, "
                   << game_assets_count() << " game assets" << std::endl;
     }
 
@@ -933,7 +933,7 @@ private:
             for (size_t i = 0; i < idx.fragments.size(); ++i)
                 tokenize(idx.fragments[i].content, idx.tokenized_docs[i]);
             idx.engine.build_index(idx.fragments, idx.tokenized_docs);
-            std::cout << "[MCDK] " << name << " index: " << idx.fragments.size() << " docs" << std::endl;
+            std::cerr << "[MCDK] " << name << " index: " << idx.fragments.size() << " docs" << std::endl;
         };
 
         auto build_en_parallel = [](CategoryIndex& idx, const char* name) {
@@ -951,7 +951,7 @@ private:
             }
             for (auto& f : futs) f.get();
             idx.engine.build_index(idx.fragments, idx.tokenized_docs);
-            std::cout << "[MCDK] " << name << " index: " << idx.fragments.size() << " docs" << std::endl;
+            std::cerr << "[MCDK] " << name << " index: " << idx.fragments.size() << " docs" << std::endl;
         };
 
         build_cn(api_index_,            "API");
@@ -977,7 +977,7 @@ private:
             }
             for (auto& f : futs) f.get();
             idx.engine.build_index(idx.fragments, idx.tokenized_docs);
-            std::cout << "[MCDK] " << name << " index: " << idx.fragments.size() << " docs" << std::endl;
+            std::cerr << "[MCDK] " << name << " index: " << idx.fragments.size() << " docs" << std::endl;
         };
 
         build_ga_parallel(game_assets_bp_, "GameAssets/BP");

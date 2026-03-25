@@ -132,7 +132,7 @@ public:
         long written = std::ftell(fp);
         std::fclose(fp);
         if (ok && written > 0) {
-            std::cout << "[MCDK] cache: saved " << (written / 1024 / 1024)
+            std::cerr << "[MCDK] cache: saved " << (written / 1024 / 1024)
                       << " MB to " << cache_path_text << std::endl;
             return true;
         }
@@ -167,13 +167,13 @@ public:
 
         uint32_t ver = fread_u32(fp);
         if (ver != VERSION) {
-            std::cout << "[MCDK] cache: version " << ver << " != " << VERSION << ", rebuilding" << std::endl;
+            std::cerr << "[MCDK] cache: version " << ver << " != " << VERSION << ", rebuilding" << std::endl;
             std::fclose(fp); return false;
         }
 
         out.fingerprint = fread_string(fp);
         if (!skip_fingerprint_check && out.fingerprint != expected_fp) {
-            std::cout << "[MCDK] cache: fingerprint mismatch, rebuilding" << std::endl;
+            std::cerr << "[MCDK] cache: fingerprint mismatch, rebuilding" << std::endl;
             std::fclose(fp); return false;
         }
 
