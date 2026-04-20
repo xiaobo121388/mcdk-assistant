@@ -1,0 +1,3 @@
+[submodule "libs/cppjieba/deps/limonp"]
+	path = libs/cppjieba/deps/limonp
+	url = https://github.com/yanyiwu/limonp.git
