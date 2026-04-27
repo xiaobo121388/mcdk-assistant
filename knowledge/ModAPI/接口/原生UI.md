@@ -715,6 +715,7 @@ method in mod.client.extraClientApi
 | newUIShopRecoModel2 | 推荐商品2 |
 | newUIShopDesk | 商店入口按钮界面 |
 
+- 该接口不支持山头服环境下使用。
 - 示例
 
 ```python
@@ -1034,6 +1035,10 @@ method in mod.client.extraClientApi
 - 返回值
 
   无
+
+- 备注
+
+  - 该接口不支持山头服环境下使用。
 
 - 示例
 
