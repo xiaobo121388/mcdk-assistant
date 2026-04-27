@@ -34,7 +34,8 @@ public:
     // 正常模式：词典、知识库、缓存都来自磁盘目录。
     SearchService(const std::filesystem::path& dicts_dir,
                   const std::filesystem::path& knowledge_dir,
-                  const std::filesystem::path& cache_path = {})
+                  const std::filesystem::path& cache_path = {},
+                  bool force_rebuild_cache = false)
         : jieba_(std::make_unique<cppjieba::Jieba>(
             fs_to_ansi(dicts_dir / "jieba.dict.utf8"),
             fs_to_ansi(dicts_dir / "hmm_model.utf8"),
@@ -44,6 +45,7 @@ public:
           ))
         , knowledge_dir_(knowledge_dir)
         , cache_path_(cache_path)
+        , force_rebuild_cache_(force_rebuild_cache)
         , cache_only_mode_(false)
     {
         this->load_stop_words(dicts_dir / "stop_words.utf8");
@@ -62,6 +64,7 @@ public:
             fs_to_ansi(dicts_dir / "stop_words.utf8")
           ))
         , cache_path_(cache_path)
+        , force_rebuild_cache_(false)
         , cache_only_mode_(cache_only)
     {
         this->load_stop_words(dicts_dir / "stop_words.utf8");
@@ -374,6 +377,7 @@ private:
     std::unique_ptr<cppjieba::Jieba> jieba_;
     std::filesystem::path           knowledge_dir_;
     std::filesystem::path           cache_path_;
+    bool                            force_rebuild_cache_ = false;
     bool                            cache_only_mode_ = false;
     std::unordered_set<std::string> stop_words_;
     CategoryIndex                   api_index_;
@@ -402,7 +406,7 @@ private:
             return;
         }
 
-        if (!cache_path_.empty()) {
+        if (!cache_path_.empty() && !force_rebuild_cache_) {
             // 有缓存时优先走恢复路径，避免每次启动都重新构建 BM25。
             std::string fp = IndexCache::compute_fingerprint(knowledge_dir_);
             std::cerr << "[MCDK] knowledge fingerprint: " << fp << std::endl;
@@ -415,7 +419,12 @@ private:
             }
         }
 
-        std::cerr << "[MCDK] 缓存未命中，开始完整构建索引..." << std::endl;
+        if (!cache_path_.empty() && force_rebuild_cache_) {
+            // std::cerr << "[MCDK] 已请求强制重建索引，跳过缓存恢复..." << std::endl;
+            // std::cerr << "[MCDK] 强制重建模式：开始完整构建索引..." << std::endl;
+        } else {
+            std::cerr << "[MCDK] 缓存未命中，开始完整构建索引..." << std::endl;
+        }
         load_knowledge_parallel();
         build_indices();
 

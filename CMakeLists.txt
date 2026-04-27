@@ -1,6 +1,6 @@
 ﻿cmake_minimum_required(VERSION 3.15)
 
-project(mcdk-assistant LANGUAGES CXX C)
+project(MCDK-ASSISTANT LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -96,7 +96,7 @@ function(mcdk_add_target target_name)
     mcdk_apply_platform_options(${target_name})
 endfunction()
 
-mcdk_add_target(${PROJECT_NAME}
+mcdk_add_target(mcdk-assistant
     WITH_STB
     SOURCES ${MCDK_SOURCES}
 )
@@ -117,12 +117,14 @@ if(NOT ANDROID)
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID)
-    install(TARGETS ${PROJECT_NAME} mcdk-asst-lite mcdk-asst-server RUNTIME DESTINATION .)
+    install(TARGETS mcdk-asst-lite mcdk-asst-lite mcdk-asst-server RUNTIME DESTINATION .)
 else()
-    install(TARGETS ${PROJECT_NAME} mcdk-asst-lite RUNTIME DESTINATION .)
+    install(TARGETS mcdk-asst-lite mcdk-asst-lite RUNTIME DESTINATION .)
 endif()
 install(DIRECTORY dicts/ DESTINATION dicts)
 install(DIRECTORY knowledge/ DESTINATION knowledge)
+
+add_subdirectory(tools)
 
 option(MCDK_BUILD_TESTS "Build test executables" OFF)
 if(MCDK_BUILD_TESTS)
