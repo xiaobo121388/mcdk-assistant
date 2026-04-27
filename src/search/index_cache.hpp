@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "search/bm25.hpp"
 #include "common/path_utils.hpp"
@@ -32,7 +32,7 @@ public:
     static std::string compute_fingerprint(const std::filesystem::path& knowledge_dir) {
         namespace fs = std::filesystem;
         static const char* WATCH[] = {
-            "ModAPI", "BedrockWiki", "NeteaseGuide", "QuModDocs",
+            "ModAPI", "BedrockWiki", "BedrockDev", "NeteaseGuide", "QuModDocs",
             "GameAssets/behavior_packs", "GameAssets/resource_packs"
         };
         uint64_t hash = 14695981039346656037ULL;
@@ -75,7 +75,7 @@ public:
 
     struct CacheData {
         std::string                fingerprint;
-        std::vector<CatData>       categories;   // api, event, enum, wiki, qumod, netease_guide
+        std::vector<CatData>       categories;   // api, event, enum, wiki, qumod, netease_guide, BedrockDev
         std::vector<GameAssetData> game_assets;  // bp, rp
     };
 

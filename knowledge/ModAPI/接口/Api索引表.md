@@ -107,6 +107,7 @@ ______________________________________________________________________
 - [自定义成就系统](#%E8%87%AA%E5%AE%9A%E4%B9%89%E6%88%90%E5%B0%B1%E7%B3%BB%E7%BB%9F)
 - [UI界面](#ui%E7%95%8C%E9%9D%A2)
 - [UI控件](#ui%E6%8E%A7%E4%BB%B6)
+- [通用设置](#%E9%80%9A%E7%94%A8%E8%AE%BE%E7%BD%AE)
 
 ## 音效
 
@@ -160,7 +161,12 @@ ______________________________________________________________________
 | 接口 | | 描述 |
 | --- | --- | --- |
 | AddBoxGeometry | 服务端 | 给自定义刚体创建盒形碰撞体 |
+| AddBoxTrigger | 服务端 | 给自定义刚体创建盒子形触发器 |
+| AddCapsuleGeometry | 服务端 | 给自定义刚体创建胶囊形碰撞体 |
 | AddForce | 服务端 | 对自定义刚体的质心添加力，对运动学刚体无效 |
+| AddForceAtPos | 服务端 | 对自定义刚体的指定位置添加力，对运动学刚体无效 |
+| AddForceAtPosLocal | 服务端 | 对自定义刚体的指定位置添加力，对运动学刚体无效 |
+| AddSphereGeometry | 服务端 | 给自定义刚体创建球形碰撞体 |
 | CreatePxActor | 服务端 | 给实体创建自定义刚体 |
 | GetQuaternion | 服务端 | 获取自定义刚体的四元数旋转 |
 | GetQuaternion | 客户端 | 获取自定义刚体的四元数旋转 |
@@ -638,9 +644,9 @@ ______________________________________________________________________
 
 | 接口 | | 描述 |
 | --- | --- | --- |
-| EntityUseItemToPos | 服务端 | 模拟实体对某个坐标使用指定物品。 |
 | UseItemAttackEntity | 服务端 | 使用指定物品攻击某个实体。 |
 | UseItemToEntity | 服务端 | 模拟对某个实体使用物品。 |
+| UseItemToPos | 服务端 | 对某个方块使用指定物品。 |
 
 #### 实体类型
 
@@ -664,8 +670,10 @@ ______________________________________________________________________
 
 | 接口 | | 描述 |
 | --- | --- | --- |
+| AddModifier | 服务端 | 为指定生物增加属性修饰符 |
 | ChangeEntityDimension | 服务端 | 传送实体 |
 | GetAllComponentsName | 服务端 | 获取实体所拥有的原版组件list |
+| GetAllModifiers | 服务端 | 获取指定生物的某属性所有属性修饰符 |
 | GetAttrMaxValue | 服务端 | 获取实体的引擎属性的最大值 |
 | GetAttrMaxValue | 客户端 | 获取属性最大值，包括生命值，饥饿度，移速等 |
 | GetAttrValue | 服务端 | 获取实体的引擎属性 |
@@ -705,6 +713,7 @@ ______________________________________________________________________
 | GetVariant | 服务端 | 获取实体的变种属性值 |
 | HasChest | 服务端 | 判断生物是否背负了箱子，截止至网易2.9版本，只对羊驼、驴、骡生效 |
 | HasComponent | 服务端 | 判断实体是否有原版组件 |
+| HasModifier | 服务端 | 获取指定生物是否含有属性修饰符 |
 | HasSaddle | 服务端 | 判断实体是否装备了鞍 |
 | IsAngry | 服务端 | 判断实体是否处于激怒状态 |
 | IsBaby | 服务端 | 判断实体是否为幼年 |
@@ -718,6 +727,7 @@ ______________________________________________________________________
 | IsTamed | 服务端 | 判断实体是否被驯服 |
 | LockLocalPlayerRot | 客户端 | 在分离摄像机时，锁定本地玩家的头部角度 |
 | PromoteToIllagerCaptain | 服务端 | 晋升实体为袭击队长，截止至网易2.9版本，只对掠夺者和卫道士有效 |
+| RemoveModifier | 服务端 | 为指定生物移除属性修饰符 |
 | ResetToDefaultValue | 服务端 | 重置实体引擎属性到默认值 |
 | ResetToMaxValue | 服务端 | 重置实体引擎属性到最大值 |
 | SetAngry | 服务端 | 设置实体是否处于激怒状态 |
@@ -750,6 +760,7 @@ ______________________________________________________________________
 | SetSize | 服务端 | 设置实体的包围盒。设置过大会导致游戏卡顿。实体的scale的立方乘以包围盒的体积不可超过32768 |
 | SetTradeLevel | 服务端 | 设置村民的交易等级 |
 | SetVariant | 服务端 | 设置实体的变种属性值 |
+| UpdateModifier | 服务端 | 为指定生物更新属性修饰符 |
 | isEntityInLava | 客户端 | 实体是否在岩浆中 |
 | isEntityOnGround | 客户端 | 实体是否触地 |
 
@@ -873,6 +884,7 @@ ______________________________________________________________________
 | GetEntityRenderDistance | 客户端 | 获取玩家的实体可渲染距离。玩家周围的实体指这个区块内的实体，也包含玩家自身。实体的渲染距离指，实体的位置到玩家相机位置的距离。可渲染距离指，如果实体的渲染距离在可渲染距离之内，则实体会被渲染出来，如果在距离以外，则实体不会被渲染出来。仅对本地玩家有效。 |
 | GetEntityUIExtraUniforms | 客户端 | 获取在实体shader当中使用的UI自定义变量的值，该变量可在微软UI纸娃娃（paperdoll）及网易版纸娃娃（neteasepaperdoll)上使用identifier渲染某一类生物实体时使用。该自定义变量包含EXTRA_ACTOR_UNIFORM1,EXTRA_ACTOR_UNIFORM2,EXTRA_ACTOR_UNIFORM3,EXTRA_ACTOR_UNIFORM4，总共4组，每组为一个vec4(float, float, float ,float)类型的向量。 |
 | GetNotRenderAtAll | 客户端 | 获取实体是否不渲染 |
+| GetQueryableBoneOrientation | 客户端 | 获取实体的原版模型指定骨骼的骨骼矩阵信息。 |
 | IsShowName | 客户端 | 获取生物名字是否按照默认游戏逻辑显示（包括玩家） |
 | RebuildActorRender | 客户端 | 重建生物的数据渲染器（该接口不支持玩家，玩家请使用RebuildPlayerRender） |
 | RebuildRenderForOneActor | 客户端 | 使用完entity类渲染接口后，重建单个生物渲染控制器（该接口不支持玩家，玩家请使用RebuildPlayerRender） |
@@ -886,6 +898,7 @@ ______________________________________________________________________
 | RemoveTextureForOneActor | 客户端 | 删除单个生物的渲染贴图 |
 | ResetActorRender | 客户端 | 重置实体渲染接口，包括动画、动画控制器、渲染控制器、贴图、材质、特效资源、音效资源等。 |
 | ResetBindEntity | 客户端 | 取消目标entity的绑定实体，取消后不再跟随任何其他entity |
+| ResetEntityExtraSkin | 客户端 | 清除通过 actorRender 接口为实体（包括玩家）额外添加的皮肤渲染组件（几何体、动画、动画控制器、贴图、材质、渲染控制器），还原实体到原始渲染状态。 |
 | ResetRenderForOneActor | 客户端 | 将调用OneActor类渲染接口(CopyPlayerTextureToOneActor、CopyPlayerRenderMaterialToOneActor等)的生物重置回种群 |
 | SetActorAllBlockGeometryVisible | 客户端 | 设置实体中所有的方块几何体模型是否显示。 |
 | SetActorBlockGeometryVisible | 客户端 | 设置实体中指定的方块几何体模型是否显示。 |
@@ -1063,6 +1076,8 @@ ______________________________________________________________________
 | GetPlayerDestroyTotalTime | 客户端 | 获取玩家破坏方块需要的时间，受玩家状态（急迫、潮涌、挖掘疲劳）和手持物及手持物附魔（效率）影响 |
 | GetPlayerExhaustionRatioByType | 服务端 | 获取玩家某行为饥饿度消耗倍率 |
 | GetPlayerInteracteRange | 服务端 | 获取玩家服务端的交互距离 |
+| GetPlayerIsFishing | 服务端 | 获取玩家是否在钓鱼 |
+| GetPlayerIsFishing | 客户端 | 获取玩家是否在钓鱼 |
 | GetPlayerMotions | 服务端 | 获取玩家身上的所有运动器 |
 | GetPlayerRespawnPos | 服务端 | 获取玩家复活点 |
 | GetRelevantPlayer | 服务端 | 获取附近玩家id列表 |
@@ -1075,7 +1090,7 @@ ______________________________________________________________________
 | OpenWorkBench | 服务端 | 在玩家当前位置打开工作台UI，不依赖于工作台方块 |
 | PickUpItemEntity | 服务端 | 某个Player拾取物品ItemEntity |
 | PlayerAttackEntity | 服务端 | 玩家使用手持武器攻击某个生物 |
-| PlayerDestoryBlock | 服务端 | 使用手上工具破坏方块 |
+| PlayerDestroyBlock | 服务端 | 使用手上工具破坏方块 |
 | PlayerUseItemToEntity | 服务端 | 玩家使用手上物品对某个生物使用 |
 | PlayerUseItemToPos | 服务端 | 模拟玩家对某个坐标使用物品 |
 | RemovePlayerMotion | 服务端 | 移除玩家身上的运动器 |
@@ -1143,6 +1158,10 @@ ______________________________________________________________________
 | GetOffhandItem | 客户端 | 获取左手物品的信息 |
 | GetPlayerAllItems | 服务端 | 获取玩家指定的槽位的批量物品信息 |
 | GetPlayerAllItems | 客户端 | 获取玩家指定的槽位的批量物品信息，支持获取盔甲栏，副手以及主手物品，背包物品仅支持本地玩家 |
+| GetPlayerFishHookEntity | 服务端 | 获取玩家钓鱼时候的鱼漂实体id |
+| GetPlayerFishHookEntity | 客户端 | 获取玩家钓鱼时候的鱼漂实体id |
+| GetPlayerFishItem | 服务端 | 获取玩家钓鱼时候的鱼竿物品字典 |
+| GetPlayerFishItem | 客户端 | 获取玩家钓鱼时候的鱼竿物品字典 |
 | GetPlayerItem | 服务端 | 获取玩家物品，支持获取背包，盔甲栏，副手以及主手物品 |
 | GetPlayerItem | 客户端 | 获取玩家物品，支持获取背包（本地玩家），盔甲栏，副手以及主手物品 |
 | GetSelectSlotId | 服务端 | 获取玩家当前选中槽位 |
@@ -1182,6 +1201,7 @@ ______________________________________________________________________
 | LockPerspective | 客户端 | 锁定玩家的视角模式 |
 | RemoveCameraMotion | 客户端 | 移除相机上的某个运动器 |
 | ResetCameraBindActorId | 客户端 | 将摄像机重新绑定回主角身上 |
+| ResetCameraPos | 客户端 | 重置相机位置模式，使相机恢复跟随玩家。用于取消SetCameraPos设置的独立相机位置。 |
 | SetCameraAnchor | 客户端 | 设置相机锚点 |
 | SetCameraBindActorId | 客户端 | 将摄像机绑定到目标实体身上（调用者与目标必须在同一个dimension，同时需要在加载范围之内，若绑定后目标离开了范围或者死亡，则会自动解除绑定） |
 | SetCameraDistanceFixed | 客户端 | 设置相机弹簧臂固定，即设置当相机遇到阻挡时是否压缩与人物之间的距离 |
@@ -1388,12 +1408,18 @@ ______________________________________________________________________
 
 | 接口 | | 描述 |
 | --- | --- | --- |
-| CancelShearsDestoryBlockSpeed | 服务端 | 取消剪刀对某一方块的破坏速度设置 |
-| CancelShearsDestoryBlockSpeedAll | 服务端 | 取消剪刀对全部方块的破坏速度设置 |
+| BindItemToMinecraftModel | 客户端 | 将指定物品作为附作物动态挂接到实体原版模型上，在实体原版模型上渲染指定物品。 |
+| BindItemToSkeletonModel | 客户端 | 将指定物品作为附作物动态挂接到实体的网易版骨骼模型，在实体的网易版骨骼模型上指定骨骼渲染指定物品。 |
+| CancelShearsDestroyBlockSpeed | 服务端 | 取消剪刀对某一方块的破坏速度设置 |
+| CancelShearsDestroyBlockSpeedAll | 服务端 | 取消剪刀对全部方块的破坏速度设置 |
 | ChangeArmorTextures | 客户端 | 修改盔甲在场景中显示和在UI中显示的贴图 |
 | ChangeItemTexture | 客户端 | 替换物品的贴图，修改后所有用到该贴图的物品都会被改变，后续创建的此类物品也会被改变。会同时修改物品在UI界面上的显示，手持时候的显示与场景掉落的显示。 |
 | GetAllEnchantsInfo | 服务端 | 获取目前已注册的所有附魔信息 |
 | GetAllEnchantsInfo | 客户端 | 获取目前已注册的所有附魔信息 |
+| GetBindBoneForBindItem | 客户端 | 查询获取实体上已绑定的物品附着物所绑定的骨骼名称。 |
+| GetBindItemOffset | 客户端 | 查询获取实体上的物品附着物相对骨骼的位置偏移。 |
+| GetBindItemRotation | 客户端 | 查询获取实体上的物品附着物相对骨骼的旋转角度。 |
+| GetBindItemScale | 客户端 | 查询获取实体上的物品附着物的缩放比例。 |
 | GetCustomName | 服务端 | 获取物品的自定义名称，与铁砧修改的名称一致 |
 | GetItemBasicInfo | 服务端 | 获取物品的基础信息 |
 | GetItemBasicInfo | 客户端 | 获取物品的基础信息 |
@@ -1414,6 +1440,10 @@ ______________________________________________________________________
 | LookupItemByName | 服务端 | 判定指定identifier的物品是否存在 |
 | RemoveItemLayer | 服务端 | 移除物品的叠加贴图。物品叠加贴图详见SetItemLayer |
 | SetAttackDamage | 服务端 | 设置物品的攻击伤害值 |
+| SetBindBoneForBindItem | 客户端 | 改变实体上已绑定的物品附着物所绑定的骨骼，又或者移除该物品附着物。 |
+| SetBindItemOffset | 客户端 | 设置实体上的物品附着物相对骨骼的位置偏移。 |
+| SetBindItemRotation | 客户端 | 设置实体上的物品附着物相对骨骼的旋转角度。 |
+| SetBindItemScale | 客户端 | 设置实体上的物品附着物的缩放比例。 |
 | SetCompassEntity | 客户端 | 设置指南针朝向的实体 |
 | SetCompassTarget | 客户端 | 设置指南针的朝向位置 |
 | SetCustomName | 服务端 | 设置物品的自定义名称，与使用铁砧重命名一致 |
@@ -1424,7 +1454,7 @@ ______________________________________________________________________
 | SetItemTierLevel | 服务端 | 设置工具类物品的挖掘等级 |
 | SetItemTierSpeed | 服务端 | 设置工具类物品的挖掘速度(可通过userData中的ModTierSpeed获取挖掘速度) |
 | SetMaxStackSize | 服务端 | 设置物品的最大堆叠数量（存档） |
-| SetShearsDestoryBlockSpeed | 服务端 | 设置剪刀对某一方块的破坏速度 |
+| SetShearsDestroyBlockSpeed | 服务端 | 设置剪刀对某一方块的破坏速度 |
 
 #### 通用
 
@@ -1913,6 +1943,15 @@ ______________________________________________________________________
 | asSwitchToggle | 客户端 | 将当前BaseUIControl转换为SwitchToggleUIControl实例，如当前控件非panel类型或非toggle则返回None |
 | asTextEditBox | 客户端 | 将当前BaseUIControl转换为TextEditBoxUIControl实例，如当前控件非editbox类型则返回None |
 | resetAnimation | 客户端 | 重置该控件的动画 |
+
+#### 通用设置
+
+| 接口 | | 描述 |
+| --- | --- | --- |
+| CloseSettingUI | 客户端 | 关闭模组信息界面 |
+| GetSettingInst | 客户端 | 获取当前模组的通用设置实例 |
+| OpenSettingUI | 客户端 | 在模组信息界面中打开设置页面（此操作仅可访问本模组的配置选项） |
+| RegisterSettingInst | 客户端 | 注册通用设置实例 |
 
 #### 音效
 

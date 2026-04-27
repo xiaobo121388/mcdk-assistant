@@ -1,6 +1,6 @@
-#pragma once
+﻿#pragma once
 // register_search.hpp — 搜索类 & 知识库 MCP 工具注册
-// 包含: search_api/event/enum/all/wiki/qumod/netease_guide, search_game_assets,
+// 包含: search_api/event/enum/all/wiki/wiki_dev/qumod/netease_guide, search_game_assets,
 //        read_knowledge, list_knowledge
 #include "search/search_service.hpp"
 #include <mcp_server.h>
@@ -49,6 +49,11 @@ inline void register_search_tools(mcp::server& srv, SearchService& search_svc,
             &SearchService::search_all},
         {"search_wiki",          "Search Bedrock Wiki documentation (English keywords)",
             &SearchService::search_wiki},
+        {"search_bedrock_dev",
+            "Search Bedrock Edition official format documentation from bedrock.dev 1.21.90 "
+            "(Addons/Animations/Biomes/Blocks/Entities/Features/Fogs/Items/Molang/Particles/Recipes/Schemas/TextureSets/Volumes). "
+            "Use this for schema definitions, component properties, and official format specs (English keywords).",
+            &SearchService::search_bedrock_dev},
         {"search_qumod",
             "搜索 QuModLibs 框架库文档（QuMod是网易流行的热门框架库，当用户使用QuMod开发时应优先查找此处功能/设计规范），"
             "注意：文档本身并不全面，当用户项目中存在QuModLibs包时还应直接分析其源代码",
