@@ -1,4 +1,4 @@
-# MCDK-ASSISTANT
+﻿# MCDK-ASSISTANT
 
 [![C++](https://img.shields.io/badge/C++-20-blue.svg)](https://isocpp.org/)
 [![CMake](https://img.shields.io/badge/CMake-3.15+-green.svg)](https://cmake.org/)
@@ -17,7 +17,7 @@
 
 能力 | 说明
 --- | ---
-🔎 智能文档检索 | 支持知识库、网易教程、ModAPI、QuMod、Bedrock Wiki、WikiDev 等资料搜索
+🔎 智能文档检索 | 支持知识库、网易教程、ModAPI、QuMod、Bedrock Wiki、BedrockDev 等资料搜索
 🧭 原版资源搜索 | 模糊搜索行为包 / 资源包原版资产，支持按文件名和内容定位
 📘 参考速查 | 快速获取网易版差异、JSON UI / 动画 / 模型参考资料
 🧩 JSON UI 分析 | 支持控件结构查询、属性搜索与问题诊断；涉及资源修改的能力仅在完整版提供

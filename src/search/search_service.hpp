@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "common/path_utils.hpp"
 #include "search/bm25.hpp"
@@ -27,7 +27,7 @@ inline std::string fs_to_ansi(const std::filesystem::path& path) {
     return path.string();
 }
 
-enum class DocCategory { Unknown, API, Event, Enum, Beta, Wiki, WikiDev, QuMod, NeteaseGuide };
+enum class DocCategory { Unknown, API, Event, Enum, Beta, Wiki, BedrockDev, QuMod, NeteaseGuide };
 
 class SearchService {
 public:
@@ -97,7 +97,7 @@ public:
         auto d = search_wiki(keyword, per_bucket_k);
         auto e = search_qumod(keyword, per_bucket_k);
         auto f = search_netease_guide(keyword, per_bucket_k);
-        auto g = search_wikidev(keyword, per_bucket_k);
+        auto g = search_bedrock_dev(keyword, per_bucket_k);
 
         std::vector<SearchResult> merged;
         merged.reserve(a.size() + b.size() + c.size() + d.size() + e.size() + f.size() + g.size());
@@ -119,8 +119,8 @@ public:
     std::vector<SearchResult> search_wiki(const std::string& keyword, int top_k = -1) const {
         return search_category_en(wiki_index_, keyword, top_k);
     }
-    std::vector<SearchResult> search_wikidev(const std::string& keyword, int top_k = -1) const {
-        return search_category_en(wikidev_index_, keyword, top_k);
+    std::vector<SearchResult> search_bedrock_dev(const std::string& keyword, int top_k = -1) const {
+        return search_category_en(bedrockdev_index_, keyword, top_k);
     }
     std::vector<SearchResult> search_qumod(const std::string& keyword, int top_k = -1) const {
         return search_category_flexible(qumod_index_, keyword, top_k, SearchMode::Auto);
@@ -129,7 +129,7 @@ public:
     size_t doc_count() const {
         return api_index_.engine.doc_count() + event_index_.engine.doc_count()
              + enum_index_.engine.doc_count() + wiki_index_.engine.doc_count()
-             + wikidev_index_.engine.doc_count()
+             + bedrockdev_index_.engine.doc_count()
              + qumod_index_.engine.doc_count() + netease_guide_index_.engine.doc_count();
     }
 
@@ -157,7 +157,7 @@ public:
         collect(event_index_);
         collect(enum_index_);
         collect(wiki_index_);
-        collect(wikidev_index_);
+        collect(bedrockdev_index_);
         collect(qumod_index_);
         collect(netease_guide_index_);
 
@@ -227,7 +227,7 @@ public:
         collect(event_index_.fragments);
         collect(enum_index_.fragments);
         collect(wiki_index_.fragments);
-        collect(wikidev_index_.fragments);
+        collect(bedrockdev_index_.fragments);
         collect(qumod_index_.fragments);
         collect(netease_guide_index_.fragments);
         collect(game_assets_bp_.fragments);
@@ -388,7 +388,7 @@ private:
     CategoryIndex                   event_index_;
     CategoryIndex                   enum_index_;
     CategoryIndex                   wiki_index_;
-    CategoryIndex                   wikidev_index_;
+    CategoryIndex                   bedrockdev_index_;
     CategoryIndex                   qumod_index_;
     CategoryIndex                   netease_guide_index_;
     GameAssetIndex                  game_assets_bp_;
@@ -440,7 +440,7 @@ private:
             free_td(wiki_index_);
             free_td(qumod_index_);
             free_td(netease_guide_index_);
-            free_td(wikidev_index_);
+            free_td(bedrockdev_index_);
             auto free_td_ga = [](GameAssetIndex& idx) {
                 std::vector<std::vector<std::string>>().swap(idx.tokenized_docs);
             };
@@ -468,7 +468,7 @@ private:
             restore_cat(wiki_index_,          cached.categories[3]);
             restore_cat(qumod_index_,         cached.categories[4]);
             restore_cat(netease_guide_index_, cached.categories[5]);
-            restore_cat(wikidev_index_,       cached.categories[6]);
+            restore_cat(bedrockdev_index_,       cached.categories[6]);
         }
 
         if (cached.game_assets.size() >= 2) {
@@ -519,7 +519,7 @@ private:
             {&wiki_index_.fragments,          &wiki_index_.tokenized_docs,          &wiki_index_.engine},
             {&qumod_index_.fragments,         &qumod_index_.tokenized_docs,         &qumod_index_.engine},
             {&netease_guide_index_.fragments, &netease_guide_index_.tokenized_docs, &netease_guide_index_.engine},
-            {&wikidev_index_.fragments,       &wikidev_index_.tokenized_docs,       &wikidev_index_.engine},
+            {&bedrockdev_index_.fragments,       &bedrockdev_index_.tokenized_docs,       &bedrockdev_index_.engine},
         };
 
         std::vector<IndexCache::GameIndexRef> ga_refs = {
@@ -541,7 +541,7 @@ private:
         free_tokenized(wiki_index_);
         free_tokenized(qumod_index_);
         free_tokenized(netease_guide_index_);
-        free_tokenized(wikidev_index_);
+        free_tokenized(bedrockdev_index_);
 
         auto free_tokenized_ga = [](GameAssetIndex& idx) {
             std::vector<std::vector<std::string>>().swap(idx.tokenized_docs);
@@ -760,8 +760,8 @@ private:
             return DocCategory::NeteaseGuide;
         if (rel_path.find("QuModDocs/") == 0 || rel_path.find("/QuModDocs/") != std::string::npos)
             return DocCategory::QuMod;
-        if (rel_path.find("WikiDev/") == 0 || rel_path.find("/WikiDev/") != std::string::npos)
-            return DocCategory::WikiDev;
+        if (rel_path.find("BedrockDev/") == 0 || rel_path.find("/BedrockDev/") != std::string::npos)
+            return DocCategory::BedrockDev;
         if (rel_path.find("BedrockWiki/") == 0 || rel_path.find("/BedrockWiki/") != std::string::npos)
             return DocCategory::Wiki;
         if (rel_path.find("/接口/") != std::string::npos || rel_path.find("接口/") == 0)
@@ -781,7 +781,7 @@ private:
         case DocCategory::Event:        return &event_index_;
         case DocCategory::Enum:         return &enum_index_;
         case DocCategory::Wiki:         return &wiki_index_;
-        case DocCategory::WikiDev:      return &wikidev_index_;
+        case DocCategory::BedrockDev:      return &bedrockdev_index_;
         case DocCategory::QuMod:        return &qumod_index_;
         case DocCategory::NeteaseGuide: return &netease_guide_index_;
         default:                        return nullptr;
@@ -975,7 +975,7 @@ private:
         rebuild_event_keyword_entries();
         build_cn(enum_index_,           "Enum");
         build_en_parallel(wiki_index_,   "Wiki");
-        build_en_parallel(wikidev_index_, "WikiDev");
+        build_en_parallel(bedrockdev_index_, "BedrockDev");
         build_cn(qumod_index_,            "QuMod");
         build_cn(netease_guide_index_,  "NeteaseGuide");
 
