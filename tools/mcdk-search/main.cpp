@@ -3,9 +3,26 @@
 namespace mcdk::search_ui {
 
 #ifdef _WIN32
-// 不再主动关闭 ENABLE_PROCESSED_INPUT。
-// 之前这样做虽然能压住 Ctrl+C 的默认行为，但会让部分 cmd/IME 组合下
-// 中英文切换、候选上屏出现异常。当前改为依赖 ControlHandler + FTXUI 自身事件处理。
+struct ConsoleInputModeGuard {
+    HANDLE handle = INVALID_HANDLE_VALUE;
+    DWORD original_mode = 0;
+    bool active = false;
+
+    void disable_processed_input() {
+        handle = GetStdHandle(STD_INPUT_HANDLE);
+        if (handle == INVALID_HANDLE_VALUE) return;
+        if (!GetConsoleMode(handle, &original_mode)) return;
+        DWORD mode = original_mode;
+        mode &= ~ENABLE_PROCESSED_INPUT;
+        if (SetConsoleMode(handle, mode)) active = true;
+    }
+
+    ~ConsoleInputModeGuard() {
+        if (active && handle != INVALID_HANDLE_VALUE) {
+            SetConsoleMode(handle, original_mode);
+        }
+    }
+};
 #endif
 
 } // namespace mcdk::search_ui
@@ -65,6 +82,11 @@ int main() {
             mcdk::search_ui::copy_text_to_clipboard(selected);
         }
     });
+
+#ifdef _WIN32
+    ConsoleInputModeGuard guard;
+    guard.disable_processed_input();
+#endif
 
     SearchApp app(service, paths, cache_only);
     screen.Loop(app.component());
