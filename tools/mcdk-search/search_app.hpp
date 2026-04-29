@@ -27,6 +27,8 @@ private:
     RuntimePaths paths_;
     bool cache_only_ = false;
     std::shared_ptr<AsyncState> async_;
+    mutable ftxui::Box results_box_;
+    mutable ftxui::Box context_box_;
 
     std::string input_;
     std::string last_query_ = "输入 /api AddItem 或直接输入关键词搜索全库";
@@ -46,6 +48,22 @@ private:
 
     bool on_event(ftxui::Event event) {
         pull_completed_searches();
+        if (event.is_mouse()) {
+            const auto& mouse = event.mouse();
+            if (mouse.button == ftxui::Mouse::WheelUp || mouse.button == ftxui::Mouse::WheelDown) {
+                const bool wheel_up = mouse.button == ftxui::Mouse::WheelUp;
+                if (context_box_.Contain(mouse.x, mouse.y)) {
+                    scroll_preview(wheel_up ? -3 : 3);
+                    return true;
+                }
+                if (results_box_.Contain(mouse.x, mouse.y)) {
+                    move_selection(wheel_up ? -1 : 1);
+                    return true;
+                }
+                scroll_preview(wheel_up ? -3 : 3);
+                return true;
+            }
+        }
         if (event == ftxui::Event::CtrlC) return true;
         if (event == ftxui::Event::Escape) {
             ftxui::ScreenInteractive::Active()->ExitLoopClosure()();
@@ -53,10 +71,16 @@ private:
         }
         if (event == ftxui::Event::Return) { run_search(); return true; }
         if (event == ftxui::Event::Tab) { apply_selected_completion(); return true; }
+        if (event == ftxui::Event::ArrowLeft) { scroll_preview(-1); return true; }
+        if (event == ftxui::Event::ArrowRight) { scroll_preview(1); return true; }
         if (event == ftxui::Event::ArrowUp) { move_selection(-1); return true; }
         if (event == ftxui::Event::ArrowDown) { move_selection(1); return true; }
         if (event == ftxui::Event::PageUp) { scroll_preview(-8); return true; }
         if (event == ftxui::Event::PageDown) { scroll_preview(8); return true; }
+        if (event == ftxui::Event::Character('u')) { scroll_preview(-16); return true; }
+        if (event == ftxui::Event::Character('d')) { scroll_preview(16); return true; }
+        if (event == ftxui::Event::Character('g')) { preview_scroll_ = 0; return true; }
+        if (event == ftxui::Event::Character('G')) { preview_scroll_ = preview_max_scroll(); return true; }
         if (event == ftxui::Event::Home) { selected_ = 0; focus_preview_on_selected(); adjust_result_scroll(); return true; }
         if (event == ftxui::Event::End) {
             if (!results_.empty()) selected_ = static_cast<int>(results_.size()) - 1;
@@ -154,7 +178,15 @@ private:
     }
 
     void scroll_preview(int delta) {
-        preview_scroll_ = std::max(0, preview_scroll_ + delta);
+        preview_scroll_ = std::clamp(preview_scroll_ + delta, 0, preview_max_scroll());
+    }
+
+    int preview_max_scroll() const {
+        if (results_.empty()) return 0;
+        const auto& item = results_[std::clamp(selected_, 0, static_cast<int>(results_.size()) - 1)];
+        const bool has_full_context = !item.context_content.empty();
+        auto lines = split_lines(has_full_context ? item.context_content : item.content);
+        return std::max(0, static_cast<int>(lines.size()) - kContextVisible);
     }
 
     void run_search() {
@@ -316,7 +348,7 @@ private:
             }
         }
         auto title = searching_ ? ("Results  " + spinner_frame(spinner_tick_) + " searching") : "Results";
-        return card(title, vbox(std::move(rows)) | flex, purple_col()) | flex;
+        return card(title, vbox(std::move(rows)) | flex, purple_col()) | reflect(results_box_) | flex;
     }
 
     Element render_result_row(int index) const {
@@ -344,7 +376,7 @@ private:
     Element render_preview() const {
         if (results_.empty()) {
             std::vector<Element> intro = {
-                text("像 Codex 一样直接搜索开发知识库") | bold | color(ftxui::Color::Cyan),
+                text("像 MCP 一样直接搜索开发知识库") | bold | color(ftxui::Color::Cyan),
                 text(""),
                 text("命令示例：") | color(ftxui::Color::GrayLight),
                 text("  /api SetBlock") | color(ftxui::Color::GreenLight),
@@ -371,6 +403,8 @@ private:
             text(" "),
             text(shorten_ascii_safe(item.file, kMaxPath)) | color(ftxui::Color::DeepSkyBlue1) | bold,
             text("  hit " + std::to_string(item.line_start) + "-" + std::to_string(item.line_end)) | color(muted_col()),
+            text(" ") | flex,
+            text(std::to_string(scroll + 1) + "-" + std::to_string(end) + "/" + std::to_string(lines.size())) | color(muted_col()),
         }));
         content.push_back(separator() | color(line_col()));
         for (int i = scroll; i < end; ++i) {
@@ -383,7 +417,8 @@ private:
         }
         if (end < static_cast<int>(lines.size())) content.push_back(text("      ↓ PageDown 查看更多") | color(muted_col()));
         if (scroll > 0) content.push_back(text("      ↑ PageUp 查看上文") | color(muted_col()));
-        return card("Context", vbox(std::move(content)) | flex, cyan_col()) | flex;
+        content.push_back(text("      ←/→ 微调滚动  u/d 快速滚动  g/G 跳到顶部/底部") | color(muted_col()));
+        return card("Context", vbox(std::move(content)) | flex, cyan_col()) | reflect(context_box_) | flex;
     }
 
     Element render_footer() const {
@@ -394,6 +429,7 @@ private:
             pill("Tab", ftxui::Color::Black, ftxui::Color::Yellow), text(" 补全  "),
             pill("↑↓", ftxui::Color::Black, ftxui::Color::Magenta), text(" 结果  "),
             pill("PgUp/PgDn", ftxui::Color::Black, ftxui::Color::BlueLight), text(" 上下文  "),
+            pill("g/G", ftxui::Color::Black, ftxui::Color::Cyan), text(" 跳转  "),
             pill("Esc", ftxui::Color::Black, ftxui::Color::RedLight), text(" 退出"),
             text("  " + status_) | color(ftxui::Color::GrayLight),
             error_.empty() ? text("") : (text("  " + error_) | color(ftxui::Color::RedLight) | bold),

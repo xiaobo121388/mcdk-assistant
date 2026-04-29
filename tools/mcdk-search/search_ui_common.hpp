@@ -9,6 +9,7 @@
 #include <ftxui/component/screen_interactive.hpp>
 #include <ftxui/dom/elements.hpp>
 #include <ftxui/screen/color.hpp>
+#include <ftxui/screen/box.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -50,6 +51,7 @@ using ftxui::Element;
 using ftxui::flex;
 using ftxui::hbox;
 using ftxui::paragraph;
+using ftxui::reflect;
 using ftxui::separator;
 using ftxui::separatorEmpty;
 using ftxui::size;

@@ -72,7 +72,7 @@ int main() {
     }
 
     auto screen = ftxui::ScreenInteractive::FullscreenAlternateScreen();
-    screen.TrackMouse(false);
+    screen.TrackMouse(true);
     screen.ForceHandleCtrlC(false);
 
 #ifdef _WIN32
