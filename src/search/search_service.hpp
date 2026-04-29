@@ -365,9 +365,16 @@ private:
     };
 
     struct CategoryIndex {
+        struct IdentifierEntry {
+            size_t      fragment_index;
+            std::string identifier_compact;
+        };
+
         std::vector<DocFragment>              fragments;
         std::vector<std::vector<std::string>> tokenized_docs;
         BM25Engine                            engine;
+        std::vector<IdentifierEntry>          identifier_entries;
+        std::unordered_map<std::string, std::vector<size_t>> identifier_exact_index;
     };
 
     struct GameAssetIndex {
@@ -504,6 +511,7 @@ private:
         }
 
         rebuild_event_keyword_entries();
+        rebuild_cn_identifier_entries();
 
         // CacheData 析构时 categories/game_assets 里剩余的临时内存自动释放
         std::cerr << "[MCDK] 缓存恢复完成: " << doc_count() << " fragments, "
@@ -577,6 +585,17 @@ private:
                                                        const std::string& keyword,
                                                        int top_k,
                                                        SearchMode mode) const {
+        if (looks_english_query(keyword)) {
+            auto identifier_hits = search_identifier_index(idx, keyword, top_k > 0 ? top_k : 8);
+            if (!identifier_hits.empty()) {
+                if (top_k <= 0 || identifier_hits.size() >= static_cast<size_t>(top_k)) return identifier_hits;
+
+                auto bm25_hits = idx.engine.search(make_query_tokens(keyword, mode, false), top_k);
+                append_unique_results(identifier_hits, bm25_hits, top_k);
+                return identifier_hits;
+            }
+        }
+
         std::vector<std::string> primary_tokens = make_query_tokens(keyword, mode, false);
         auto results = idx.engine.search(primary_tokens, top_k);
         if (!results.empty()) return results;
@@ -588,6 +607,19 @@ private:
         std::vector<std::string> fallback_tokens = make_query_tokens(keyword, mode, true);
         if (fallback_tokens == primary_tokens) return results;
         return idx.engine.search(fallback_tokens, top_k);
+    }
+
+    static void append_unique_results(std::vector<SearchResult>& dst,
+                                      const std::vector<SearchResult>& src,
+                                      int top_k) {
+        std::unordered_set<const DocFragment*> seen;
+        seen.reserve(dst.size() + src.size());
+        for (const auto& item : dst) seen.insert(item.fragment);
+        for (const auto& item : src) {
+            if (top_k > 0 && dst.size() >= static_cast<size_t>(top_k)) break;
+            if (!item.fragment || !seen.insert(item.fragment).second) continue;
+            dst.push_back(item);
+        }
     }
 
     std::vector<SearchResult> search_event_keyword_index(const std::string& keyword, int top_k) const {
@@ -641,6 +673,78 @@ private:
 
         if (!merged.empty()) return merged;
         return search_category_flexible(event_index_, keyword, top_k, SearchMode::PreferEnglishFallback);
+    }
+
+    std::vector<SearchResult> search_identifier_index(const CategoryIndex& idx,
+                                                      const std::string& keyword,
+                                                      int top_k) const {
+        if (top_k <= 0) top_k = 8;
+
+        std::vector<std::string> raw_terms;
+        tokenize_en(keyword, raw_terms);
+        if (raw_terms.empty()) return {};
+
+        std::vector<std::string> query_terms;
+        query_terms.reserve(raw_terms.size());
+        std::unordered_set<std::string> seen_terms;
+        for (const auto& term : raw_terms) {
+            std::string compact = compact_ascii_identifier(term);
+            if (compact.empty()) continue;
+            if (seen_terms.insert(compact).second) query_terms.push_back(std::move(compact));
+        }
+        if (query_terms.empty()) return {};
+
+        std::unordered_map<size_t, double> score_map;
+        score_map.reserve(static_cast<size_t>(top_k) * 4);
+
+        for (const auto& term : query_terms) {
+            auto exact_it = idx.identifier_exact_index.find(term);
+            if (exact_it != idx.identifier_exact_index.end()) {
+                for (size_t entry_index : exact_it->second) {
+                    if (entry_index >= idx.identifier_entries.size()) continue;
+                    const auto& entry = idx.identifier_entries[entry_index];
+                    score_map[entry.fragment_index] += 3000.0;
+                }
+            }
+
+            static constexpr size_t kMaxIdentifierScan = 20000;
+            const size_t scan_count = std::min(idx.identifier_entries.size(), kMaxIdentifierScan);
+            for (size_t i = 0; i < scan_count; ++i) {
+                const auto& entry = idx.identifier_entries[i];
+                const auto& ident = entry.identifier_compact;
+                if (ident.empty() || ident == term) continue;
+                if (ident.rfind(term, 0) == 0) {
+                    score_map[entry.fragment_index] += 2000.0 - static_cast<double>(ident.size() - term.size());
+                    continue;
+                }
+                auto pos = ident.find(term);
+                if (pos != std::string::npos) {
+                    score_map[entry.fragment_index] += 1200.0 - static_cast<double>(pos * 4);
+                }
+            }
+        }
+
+        if (score_map.empty()) return {};
+
+        std::vector<SearchResult> results;
+        results.reserve(score_map.size());
+        for (const auto& [fragment_index, score] : score_map) {
+            if (fragment_index >= idx.fragments.size()) continue;
+            results.push_back({&idx.fragments[fragment_index], score});
+        }
+
+        auto sorter = [](const SearchResult& a, const SearchResult& b) {
+            if (a.score != b.score) return a.score > b.score;
+            if (a.fragment->file != b.fragment->file) return a.fragment->file < b.fragment->file;
+            return a.fragment->line_start < b.fragment->line_start;
+        };
+        if (top_k > 0 && results.size() > static_cast<size_t>(top_k)) {
+            std::partial_sort(results.begin(), results.begin() + static_cast<ptrdiff_t>(top_k), results.end(), sorter);
+            results.resize(static_cast<size_t>(top_k));
+        } else {
+            std::sort(results.begin(), results.end(), sorter);
+        }
+        return results;
     }
 
     std::vector<std::string> make_query_tokens(const std::string& text,
@@ -708,6 +812,45 @@ private:
         return out;
     }
 
+    static std::string compact_ascii_identifier(const std::string& text) {
+        std::string out;
+        out.reserve(text.size());
+        for (unsigned char c : text) {
+            if (std::isalnum(c)) out.push_back(static_cast<char>(std::tolower(c)));
+        }
+        return out;
+    }
+
+    static std::string extract_heading_identifier_limited(const std::string& content) {
+        size_t pos = 0;
+        const size_t limit = std::min<size_t>(content.size(), 2048);
+        for (int line_index = 0; line_index < 8 && pos < limit; ++line_index) {
+            size_t line_end = content.find('\n', pos);
+            if (line_end == std::string::npos || line_end > limit) line_end = limit;
+            size_t line_size = line_end - pos;
+            if (line_size > 0 && content[pos + line_size - 1] == '\r') --line_size;
+
+            size_t level = 0;
+            while (level < line_size && content[pos + level] == '#') ++level;
+            if (level > 0 && level < line_size && std::isspace(static_cast<unsigned char>(content[pos + level]))) {
+                size_t begin = pos + level + 1;
+                size_t end = pos + line_size;
+                while (begin < end && std::isspace(static_cast<unsigned char>(content[begin]))) ++begin;
+                while (end > begin && std::isspace(static_cast<unsigned char>(content[end - 1]))) --end;
+
+                std::string word;
+                for (size_t i = begin; i < end; ++i) {
+                    unsigned char c = static_cast<unsigned char>(content[i]);
+                    if (std::isalnum(c) || c == '_') word.push_back(static_cast<char>(c));
+                    else if (!word.empty()) break;
+                }
+                if (!word.empty() && std::isalpha(static_cast<unsigned char>(word.front()))) return word;
+            }
+            pos = line_end + 1;
+        }
+        return {};
+    }
+
     static std::string extract_best_event_identifier(const std::string& content) {
         std::string best;
         std::string word;
@@ -738,6 +881,30 @@ private:
             if (best.empty()) continue;
             event_keyword_entries_.push_back({i, to_ascii_lower(best)});
         }
+    }
+
+    static void rebuild_identifier_entries(CategoryIndex& idx) {
+        idx.identifier_entries.clear();
+        idx.identifier_exact_index.clear();
+        idx.identifier_entries.reserve(idx.fragments.size());
+
+        for (size_t i = 0; i < idx.fragments.size(); ++i) {
+            std::string identifier = extract_heading_identifier_limited(idx.fragments[i].content);
+            std::string compact = compact_ascii_identifier(identifier);
+            if (compact.empty()) continue;
+
+            const size_t entry_index = idx.identifier_entries.size();
+            idx.identifier_entries.push_back({i, compact});
+            idx.identifier_exact_index[compact].push_back(entry_index);
+        }
+    }
+
+    void rebuild_cn_identifier_entries() {
+        rebuild_identifier_entries(api_index_);
+        rebuild_identifier_entries(event_index_);
+        rebuild_identifier_entries(enum_index_);
+        rebuild_identifier_entries(qumod_index_);
+        rebuild_identifier_entries(netease_guide_index_);
     }
 
     static void normalize_tokens(std::vector<std::string>& tokens) {
@@ -987,6 +1154,7 @@ private:
         build_en_parallel(bedrockdev_index_, "BedrockDev");
         build_cn(qumod_index_,            "QuMod");
         build_cn(netease_guide_index_,  "NeteaseGuide");
+        rebuild_cn_identifier_entries();
 
         auto build_ga_parallel = [](GameAssetIndex& idx, const char* name) {
             size_t n = idx.fragments.size();
