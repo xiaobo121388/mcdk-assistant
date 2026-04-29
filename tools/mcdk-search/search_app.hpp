@@ -431,7 +431,6 @@ private:
     }
 
     Element render_footer() const {
-        std::string path_text = "dicts=" + shorten_ascii_safe(mcdk::path::to_utf8(paths_.dicts_dir), 48);
         auto status = hbox({
             pill("Enter", ftxui::Color::Black, ftxui::Color::Cyan), text(" 搜索  "),
             pill("/", ftxui::Color::Black, ftxui::Color::GreenLight), text(" 命令  "),
@@ -442,8 +441,6 @@ private:
             pill("Esc", ftxui::Color::Black, ftxui::Color::RedLight), text(" 退出"),
             text("  " + status_) | color(ftxui::Color::GrayLight),
             error_.empty() ? text("") : (text("  " + error_) | color(ftxui::Color::RedLight) | bold),
-            text(" ") | flex,
-            muted(path_text),
         });
         return vbox({status});
     }
