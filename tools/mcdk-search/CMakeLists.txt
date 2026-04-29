@@ -21,10 +21,6 @@ target_link_libraries(mcdk-search PRIVATE
     Threads::Threads
 )
 
-target_compile_definitions(mcdk-search PRIVATE
-    MCDK_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
-)
-
 if(WIN32)
     target_link_libraries(mcdk-search PRIVATE ws2_32)
 endif()

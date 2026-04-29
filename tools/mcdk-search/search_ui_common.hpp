@@ -291,11 +291,6 @@ inline RuntimePaths detect_paths() {
 
     std::vector<fs::path> bases;
     bases.push_back(paths.exe_dir);
-    bases.push_back(fs::current_path());
-    if (paths.exe_dir.has_parent_path()) bases.push_back(paths.exe_dir.parent_path());
-    if (paths.exe_dir.has_parent_path() && paths.exe_dir.parent_path().has_parent_path()) {
-        bases.push_back(paths.exe_dir.parent_path().parent_path());
-    }
 
     for (const auto& base : bases) {
         auto dicts = base / "dicts";
