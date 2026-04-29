@@ -74,6 +74,12 @@ int main() {
     auto screen = ftxui::ScreenInteractive::FullscreenAlternateScreen();
     screen.TrackMouse(true);
     screen.ForceHandleCtrlC(false);
+    screen.SelectionChange([&screen] {
+        auto selected = mcdk::search_ui::sanitize_selection_text(screen.GetSelection());
+        if (!selected.empty()) {
+            mcdk::search_ui::copy_text_to_clipboard(selected);
+        }
+    });
 
 #ifdef _WIN32
     ConsoleInputModeGuard guard;

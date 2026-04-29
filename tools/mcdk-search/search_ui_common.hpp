@@ -410,6 +410,79 @@ inline std::string spinner_frame(int tick) {
     return frames[static_cast<size_t>(tick) % (sizeof(frames) / sizeof(frames[0]))];
 }
 
+inline bool copy_text_to_clipboard(const std::string& text) {
+#ifdef _WIN32
+    if (text.empty()) return false;
+
+    int wide_len = MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
+    if (wide_len <= 0) return false;
+
+    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>((wide_len + 1) * sizeof(wchar_t)));
+    if (!mem) return false;
+
+    auto* wide = static_cast<wchar_t*>(GlobalLock(mem));
+    if (!wide) {
+        GlobalFree(mem);
+        return false;
+    }
+
+    MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), wide, wide_len);
+    wide[wide_len] = L'\0';
+    GlobalUnlock(mem);
+
+    if (!OpenClipboard(nullptr)) {
+        GlobalFree(mem);
+        return false;
+    }
+
+    EmptyClipboard();
+    if (!SetClipboardData(CF_UNICODETEXT, mem)) {
+        CloseClipboard();
+        GlobalFree(mem);
+        return false;
+    }
+
+    CloseClipboard();
+    return true;
+#else
+    (void)text;
+    return false;
+#endif
+}
+
+inline std::string sanitize_selection_text(const std::string& text) {
+    std::istringstream iss(text);
+    std::string line;
+    std::string out;
+    bool first = true;
+    while (std::getline(iss, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+
+        auto bar = line.find("│");
+        if (bar != std::string::npos) {
+            bool numeric_prefix = true;
+            for (size_t i = 0; i < bar; ++i) {
+                const unsigned char c = static_cast<unsigned char>(line[i]);
+                if (!std::isspace(c) && !std::isdigit(c)) {
+                    numeric_prefix = false;
+                    break;
+                }
+            }
+            if (numeric_prefix) {
+                line = line.substr(bar + std::string("│").size());
+                while (!line.empty() && std::isspace(static_cast<unsigned char>(line.front()))) {
+                    line.erase(line.begin());
+                }
+            }
+        }
+
+        if (!first) out += '\n';
+        out += line;
+        first = false;
+    }
+    return out;
+}
+
 inline std::string mode_from_file(const std::string& file) {
     if (file.find("ModAPI/接口") != std::string::npos) return "API";
     if (file.find("ModAPI/事件") != std::string::npos) return "EVENT";
@@ -443,16 +516,19 @@ inline std::vector<SearchItem> search_with_service(const std::shared_ptr<mcdk::S
         item.line_start = r.fragment->line_start;
         item.line_end = r.fragment->line_end;
         item.score = r.score;
-
-        auto full = service->read_cached_file(item.file, 1, INT_MAX);
-        if (full.found && !full.content.empty()) {
-            item.context_content = std::move(full.content);
-            item.context_line_start = 1;
-            item.context_total_lines = full.total_lines;
-        }
         items.push_back(std::move(item));
     }
     return items;
+}
+
+inline void load_full_context_for_item(const std::shared_ptr<mcdk::SearchService>& service, SearchItem& item) {
+    if (!item.context_content.empty()) return;
+    auto full = service->read_cached_file(item.file, 1, INT_MAX);
+    if (full.found && !full.content.empty()) {
+        item.context_content = std::move(full.content);
+        item.context_line_start = 1;
+        item.context_total_lines = full.total_lines;
+    }
 }
 
 } // namespace mcdk::search_ui

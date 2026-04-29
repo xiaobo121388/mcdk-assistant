@@ -157,6 +157,7 @@ private:
         }
         if (results_.empty()) return;
         selected_ = std::clamp(selected_ + delta, 0, static_cast<int>(results_.size()) - 1);
+        ensure_selected_context_loaded();
         focus_preview_on_selected();
         adjust_result_scroll();
     }
@@ -165,6 +166,12 @@ private:
         if (selected_ < result_scroll_) result_scroll_ = selected_;
         if (selected_ >= result_scroll_ + kResultVisible) result_scroll_ = selected_ - kResultVisible + 1;
         result_scroll_ = std::max(0, result_scroll_);
+    }
+
+    void ensure_selected_context_loaded() {
+        if (results_.empty()) return;
+        auto& item = results_[std::clamp(selected_, 0, static_cast<int>(results_.size()) - 1)];
+        load_full_context_for_item(service_, item);
     }
 
     void focus_preview_on_selected() {
@@ -178,6 +185,7 @@ private:
     }
 
     void scroll_preview(int delta) {
+        ensure_selected_context_loaded();
         preview_scroll_ = std::clamp(preview_scroll_ + delta, 0, preview_max_scroll());
     }
 
@@ -241,6 +249,7 @@ private:
             results_ = std::move(payload.results);
             selected_ = 0;
             result_scroll_ = 0;
+            ensure_selected_context_loaded();
             focus_preview_on_selected();
             if (!payload.error.empty()) {
                 error_ = payload.error;
