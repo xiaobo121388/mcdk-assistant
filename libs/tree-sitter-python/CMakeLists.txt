@@ -17,14 +17,14 @@ endif()
 
 include(GNUInstallDirs)
 
-find_program(TREE_SITTER_CLI tree-sitter DOC "Tree-sitter CLI")
-
-add_custom_command(OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/src/parser.c"
-                   DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/grammar.json"
-                   COMMAND "${TREE_SITTER_CLI}" generate src/grammar.json
-                            --abi=${TREE_SITTER_ABI_VERSION}
-                   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-                   COMMENT "Generating parser.c")
+# Use the pre-generated parser.c from the vendored repository.
+# If you have tree-sitter CLI installed, you can regenerate it with:
+#   tree-sitter generate src/grammar.json --abi=15
+# For now we simply compile the bundled parser to avoid build-time toolchain dependencies.
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/parser.c")
+    message(FATAL_ERROR "parser.c not found at ${CMAKE_CURRENT_SOURCE_DIR}/src/parser.c. "
+                        "Please run 'tree-sitter generate' or install tree-sitter CLI.")
+endif()
 
 add_library(tree-sitter-python src/parser.c)
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/scanner.c)
@@ -60,7 +60,3 @@ install(TARGETS tree-sitter-python
 file(GLOB QUERIES queries/*.scm)
 install(FILES ${QUERIES}
         DESTINATION "${CMAKE_INSTALL_DATADIR}/tree-sitter/queries/python")
-
-add_custom_target(ts-test "${TREE_SITTER_CLI}" test
-                  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-                  COMMENT "tree-sitter test")

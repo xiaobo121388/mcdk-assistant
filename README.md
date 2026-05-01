@@ -167,6 +167,10 @@ LITE 版和完整版支持 `--stdio` 参数，直接以 stdio 传输模式启动
   PNG 读写与像素画处理
 - `cpp-httplib`
   由 `cpp-mcp` 间接使用的 HTTP 能力
+- `tree-sitter`
+  通用语法分析与结构树构建
+- `tree-sitter-python`
+  Python 语言的 Tree-sitter 语法定义，用于解析 Python 代码
 
 ### 🛠️ 关于 `cpp-mcp`
 
