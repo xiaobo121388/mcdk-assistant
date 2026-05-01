@@ -74,7 +74,7 @@ void register_tools(mcp::server& srv,
 
     mcdk::register_search_tools(srv, search_svc, effective_knowledge_dir);
     mcdk::register_netease_tools(srv);
-#if !defined(MCDK_SERVER) && !defined(MCDK_LITE)
+#ifndef MCDK_SERVER
     mcdk::register_python_analysis_tools(srv);
 #endif
 #ifndef MCDK_LITE
@@ -153,4 +153,3 @@ void register_server_endpoints(mcp::server& srv,
 }
 
 } // namespace mcdk::app
-

@@ -129,12 +129,12 @@ bool path_exists(const fs::path& path) {
     return fs::exists(path, ec);
 }
 
-bool is_directory(const fs::path& path) {
+bool check_is_directory(const fs::path& path) {
     std::error_code ec;
     return fs::is_directory(path, ec);
 }
 
-bool is_regular_file(const fs::path& path) {
+bool check_is_regular_file(const fs::path& path) {
     std::error_code ec;
     return fs::is_regular_file(path, ec);
 }
@@ -150,8 +150,9 @@ bool is_python_file(const fs::path& path) {
     return path.extension() == ".py";
 }
 
-bool should_skip_dir(const fs::path& dir) {
+bool should_skip_dir(const fs::path& dir, bool ignore_third_party_analysis = false) {
     auto name = dir.filename().string();
+    if (ignore_third_party_analysis && name == "QuModLibs") return true;
     return name == "__pycache__" || name == ".git" || name == ".svn" || name == ".idea" || name == ".vs";
 }
 
@@ -166,15 +167,12 @@ std::string read_text_file(const fs::path& file_path) {
     return text;
 }
 
-std::vector<std::string> builtin_static_packages(const AnalysisOptions& options) {
-    std::vector<std::string> names = options.static_third_party_packages;
-    if (std::find(names.begin(), names.end(), "QuModLibs") == names.end()) names.push_back("QuModLibs");
-    return names;
-}
-
-bool is_static_third_party(const std::string& first_segment, const AnalysisOptions& options) {
-    auto names = builtin_static_packages(options);
-    return std::find(names.begin(), names.end(), first_segment) != names.end();
+bool is_static_third_party_module(const std::string& module_name) {
+    if (module_name.empty()) return false;
+    for (const auto& part : split(module_name, '.')) {
+        if (part == "QuModLibs") return true;
+    }
+    return false;
 }
 
 bool is_probable_stdlib(const std::string& first_segment) {
@@ -198,6 +196,15 @@ std::string node_text(TSNode node, const std::string& source) {
     auto end = ts_node_end_byte(node);
     if (start > source.size() || end > source.size() || start > end) return {};
     return source.substr(start, end - start);
+}
+
+std::string path_to_utf8(const fs::path& p) {
+    return mcdk::path::to_utf8(p);
+}
+
+std::string generic_u8string_to_string(const fs::path& p) {
+    auto u8 = p.generic_u8string();
+    return std::string(reinterpret_cast<const char*>(u8.data()), u8.size());
 }
 
 std::string module_name_for_file(const fs::path& mod_root, const std::string& mod_name, const fs::path& file_path) {
@@ -252,7 +259,7 @@ void dedup_symbols(std::vector<SymbolInfo>& symbols) {
 std::vector<std::string> discover_modules_under_directory(const fs::path& root_dir,
                                                           const std::string& mod_name) {
     std::vector<std::string> modules;
-    if (!is_directory(root_dir)) return modules;
+    if (!check_is_directory(root_dir)) return modules;
     std::error_code ec;
     fs::recursive_directory_iterator it(root_dir, ec), end;
     while (!ec && it != end) {
@@ -268,13 +275,14 @@ std::vector<std::string> discover_modules_under_directory(const fs::path& root_d
     return modules;
 }
 
-std::vector<ModPackage> discover_mod_packages(const fs::path& behavior_pack_root) {
+std::vector<ModPackage> discover_mod_packages(const fs::path& behavior_pack_root,
+                                              const AnalysisOptions& options) {
     std::vector<ModPackage> mods;
-    if (!is_directory(behavior_pack_root)) return mods;
+    if (!check_is_directory(behavior_pack_root)) return mods;
     std::error_code ec;
     fs::recursive_directory_iterator it(behavior_pack_root, ec), end;
     while (!ec && it != end) {
-        if (it->is_directory(ec) && should_skip_dir(it->path())) {
+        if (it->is_directory(ec) && should_skip_dir(it->path(), options.ignore_third_party_analysis)) {
             it.disable_recursion_pending();
         } else if (it->is_regular_file(ec) && it->path().filename() == "modMain.py") {
             ModPackage pkg;
@@ -285,7 +293,7 @@ std::vector<ModPackage> discover_mod_packages(const fs::path& behavior_pack_root
             std::error_code inner_ec;
             fs::recursive_directory_iterator fit(pkg.root_dir, inner_ec), fend;
             while (!inner_ec && fit != fend) {
-                if (fit->is_directory(inner_ec) && should_skip_dir(fit->path())) {
+                if (fit->is_directory(inner_ec) && should_skip_dir(fit->path(), options.ignore_third_party_analysis)) {
                     fit.disable_recursion_pending();
                 } else if (fit->is_regular_file(inner_ec) && is_python_file(fit->path())) {
                     pkg.files.push_back(normalize_path(fit->path()));
@@ -302,7 +310,7 @@ std::vector<ModPackage> discover_mod_packages(const fs::path& behavior_pack_root
         it.increment(ec);
     }
     std::sort(mods.begin(), mods.end(), [](const ModPackage& a, const ModPackage& b) {
-        return a.root_dir.generic_u8string() < b.root_dir.generic_u8string();
+        return generic_u8string_to_string(a.root_dir) < generic_u8string_to_string(b.root_dir);
     });
     mods.erase(std::unique(mods.begin(), mods.end(), [](const ModPackage& a, const ModPackage& b) {
         return a.root_dir == b.root_dir;
@@ -493,11 +501,12 @@ void build_dependency_graph(ProjectIndex& index, const AnalysisOptions& options)
             if (!matched) {
                 auto base = resolve_relative_module(imp, file);
                 auto first = first_segment(base.empty() ? imp.raw_module : base);
-                if (is_static_third_party(first, options)) {
+                if (options.ignore_third_party_analysis &&
+                    is_static_third_party_module(base.empty() ? imp.raw_module : base)) {
                     imp.external_kind = "third-party-static";
-                    imp.resolved_module = first;
+                    imp.resolved_module = "QuModLibs";
                     imp.confidence = 0.80;
-                    index.external_usage[first].push_back(module_name + ": line " + std::to_string(imp.line));
+                    index.external_usage[imp.resolved_module].push_back(module_name + ": line " + std::to_string(imp.line));
                 } else if (is_probable_stdlib(first)) {
                     imp.external_kind = "stdlib";
                     imp.resolved_module = first;
@@ -533,7 +542,7 @@ ProjectIndex build_index_for_behavior_pack(const fs::path& behavior_pack_root,
     ProjectIndex index;
     index.behavior_pack_root = normalize_path(behavior_pack_root);
     index.manifest_found = path_exists(index.behavior_pack_root / "manifest.json");
-    index.mod_packages = discover_mod_packages(index.behavior_pack_root);
+    index.mod_packages = discover_mod_packages(index.behavior_pack_root, options);
     if (index.mod_packages.empty()) {
         index.diagnostics.push_back("未发现任何 modMain.py，无法识别有效 mod 包。");
         return index;
@@ -555,8 +564,16 @@ ScopeResolution resolve_scope_for_target(const fs::path& target_path, int max_up
     scope.normalized_target = normalize_path(target_path);
 
     fs::path start = scope.normalized_target;
-    if (is_regular_file(start)) start = start.parent_path();
+    if (check_is_regular_file(start)) start = start.parent_path();
     start = normalize_path(start);
+
+    // 如果起始目录本身包含 manifest.json，说明这就是行为包根，无需上溯
+    if (path_exists(start / "manifest.json")) {
+        scope.behavior_pack_root = start;
+        scope.scope_mode = "behavior-pack";
+        scope.upward_steps = 0;
+        return scope;
+    }
 
     fs::path current = start;
     for (int depth = 0; depth <= std::max(1, max_upward_levels); ++depth) {
@@ -599,7 +616,7 @@ ProjectIndex build_index_for_scope(const ScopeResolution& scope, const AnalysisO
     std::error_code ec;
     fs::recursive_directory_iterator it(scope.mod_root, ec), end;
     while (!ec && it != end) {
-        if (it->is_directory(ec) && should_skip_dir(it->path())) {
+        if (it->is_directory(ec) && should_skip_dir(it->path(), options.ignore_third_party_analysis)) {
             it.disable_recursion_pending();
         } else if (it->is_regular_file(ec) && is_python_file(it->path())) {
             pkg.files.push_back(normalize_path(it->path()));
@@ -621,8 +638,8 @@ TargetSelection select_target_modules(const ProjectIndex& index,
                                       const ScopeResolution& scope) {
     TargetSelection selection;
     auto target = scope.normalized_target;
-    selection.is_python_file = is_regular_file(target) && is_python_file(target);
-    selection.is_directory = is_directory(target);
+    selection.is_python_file = check_is_regular_file(target) && is_python_file(target);
+    selection.is_directory = check_is_directory(target);
 
     if (selection.is_python_file && !scope.mod_root.empty()) {
         auto module = module_name_for_file(scope.mod_root, scope.mod_name, target);
@@ -631,10 +648,10 @@ TargetSelection select_target_modules(const ProjectIndex& index,
     }
 
     if (selection.is_directory) {
-        auto dir_norm = normalize_path(target).generic_u8string();
+        auto dir_norm = generic_u8string_to_string(normalize_path(target));
         for (const auto& [module_name, file] : index.files_by_module) {
-            auto file_dir = normalize_path(file.path.parent_path()).generic_u8string();
-            auto file_full = normalize_path(file.path).generic_u8string();
+            auto file_dir = generic_u8string_to_string(normalize_path(file.path.parent_path()));
+            auto file_full = generic_u8string_to_string(normalize_path(file.path));
             if (file_dir == dir_norm || file_full.rfind(dir_norm + "/", 0) == 0 || file_dir.rfind(dir_norm + "/", 0) == 0) {
                 selection.modules.push_back(module_name);
             }
@@ -681,14 +698,14 @@ std::vector<std::pair<std::string, int>> compute_indirect_referrers(const Projec
 
 void append_scope_summary(std::ostringstream& oss, const ScopeResolution& scope) {
     oss << "作用域解析\n";
-    oss << "- 请求目标: " << mcdk::path::to_utf8(scope.normalized_target) << "\n";
+    oss << "- 请求目标: " << path_to_utf8(scope.normalized_target) << "\n";
     oss << "- 解析模式: " << scope.scope_mode << "\n";
     if (!scope.mod_root.empty()) {
-        oss << "- mod 包根: " << mcdk::path::to_utf8(scope.mod_root) << "\n";
+        oss << "- mod 包根: " << path_to_utf8(scope.mod_root) << "\n";
         oss << "- mod 包名: " << scope.mod_name << "\n";
     }
     if (!scope.behavior_pack_root.empty()) {
-        oss << "- 行为包根: " << mcdk::path::to_utf8(scope.behavior_pack_root) << "\n";
+        oss << "- 行为包根: " << path_to_utf8(scope.behavior_pack_root) << "\n";
     }
     oss << "- 向上解析层数: " << scope.upward_steps << "\n\n";
 }
@@ -769,7 +786,7 @@ std::string summarize_top_modules(const ProjectIndex& index, const ModPackage& p
 std::string format_behavior_pack_report(const ProjectIndex& index, const AnalysisOptions& options) {
     std::ostringstream oss;
     oss << "Python 2 行为包架构分析\n";
-    oss << "- 行为包路径: " << mcdk::path::to_utf8(index.behavior_pack_root) << "\n";
+    oss << "- 行为包路径: " << path_to_utf8(index.behavior_pack_root) << "\n";
     oss << "- manifest.json: " << (index.manifest_found ? "已发现" : "未发现") << "\n";
     oss << "- mod 包数量: " << index.mod_packages.size() << "\n";
     oss << "- Python 模块数量: " << index.files_by_module.size() << "\n\n";
@@ -783,7 +800,7 @@ std::string format_behavior_pack_report(const ProjectIndex& index, const Analysi
     oss << "入口与子包总览\n";
     for (const auto& pkg : index.mod_packages) {
         oss << "- " << pkg.name << "\n";
-        oss << "  - root: " << mcdk::path::to_utf8(pkg.root_dir) << "\n";
+        oss << "  - root: " << path_to_utf8(pkg.root_dir) << "\n";
         oss << "  - entry: " << pkg.name << ".modMain\n";
         oss << "  - files: " << pkg.files.size() << ", modules: " << pkg.modules.size() << "\n";
         oss << "  - 关键模块:\n";
@@ -844,7 +861,7 @@ std::string format_reference_report(const ProjectIndex& index,
     for (const auto& module : selection.modules) {
         auto it = index.files_by_module.find(module);
         if (it == index.files_by_module.end()) continue;
-        oss << "- " << module << " -> " << mcdk::path::to_utf8(it->second.path)
+        oss << "- " << module << " -> " << path_to_utf8(it->second.path)
             << " [health=" << it->second.health
             << ", confidence=" << format_double(it->second.confidence) << "]\n";
     }
@@ -896,8 +913,8 @@ std::string format_reference_report(const ProjectIndex& index,
 std::string ProjectAnalyzer::analyze_behavior_pack(const fs::path& behavior_pack_path,
                                                    const AnalysisOptions& options) const {
     auto root = normalize_path(behavior_pack_path);
-    if (!path_exists(root) || !is_directory(root)) {
-        return "无效行为包路径: " + mcdk::path::to_utf8(root);
+    if (!path_exists(root) || !check_is_directory(root)) {
+        return "无效行为包路径: " + path_to_utf8(root);
     }
     auto index = build_index_for_behavior_pack(root, options);
     return format_behavior_pack_report(index, options);
@@ -907,7 +924,7 @@ std::string ProjectAnalyzer::analyze_target_references(const fs::path& target_pa
                                                        const AnalysisOptions& options) const {
     auto normalized = normalize_path(target_path);
     if (!path_exists(normalized)) {
-        return "无效目标路径: " + mcdk::path::to_utf8(normalized);
+        return "无效目标路径: " + path_to_utf8(normalized);
     }
 
     auto scope = resolve_scope_for_target(normalized, options.max_scope_upward_levels);

@@ -48,6 +48,7 @@ set(MCDK_LITE_SOURCES
     src/main.cpp
     src/app/runtime_paths.cpp
     src/app/server_runtime.cpp
+    src/project_analysis/project_analyzer.cpp
 )
 
 # 平台处理函数封装

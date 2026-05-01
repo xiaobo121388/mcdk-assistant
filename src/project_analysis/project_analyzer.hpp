@@ -12,8 +12,9 @@ struct AnalysisOptions {
     bool include_unresolved = true;
     bool include_indirect = true;
     bool include_call_hints = true;
+    bool ignore_third_party_analysis = true;
     int max_scope_upward_levels = 12;
-    std::vector<std::string> static_third_party_packages = {"QuModLibs"};
+    // QuModLibs 是唯一静态三方库，判定逻辑硬编码在 [is_static_third_party_module()](src/project_analysis/project_analyzer.cpp:169) 中
 };
 
 class ProjectAnalyzer {
