@@ -3,6 +3,7 @@
 #include "common/path_utils.hpp"
 #include "search/search_service.hpp"
 #include "tools/register_netease.hpp"
+#include "tools/register_python_analysis.hpp"
 #include "tools/register_search.hpp"
 
 #ifndef MCDK_LITE
@@ -73,6 +74,9 @@ void register_tools(mcp::server& srv,
 
     mcdk::register_search_tools(srv, search_svc, effective_knowledge_dir);
     mcdk::register_netease_tools(srv);
+#ifndef MCDK_SERVER
+    mcdk::register_python_analysis_tools(srv);
+#endif
 #ifndef MCDK_LITE
     mcdk::register_jsonui_tools(srv);
     mcdk::register_pixel_art_tools(srv);
@@ -149,4 +153,3 @@ void register_server_endpoints(mcp::server& srv,
 }
 
 } // namespace mcdk::app
-

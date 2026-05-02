@@ -26,6 +26,9 @@ find_package(Threads REQUIRED)
 add_subdirectory(libs/cpp-mcp)
 target_link_libraries(mcp PUBLIC nlohmann_json::nlohmann_json)
 
+add_subdirectory(libs/tree-sitter)
+add_subdirectory(libs/tree-sitter-python)
+
 add_library(cppjieba INTERFACE)
 target_include_directories(cppjieba INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/libs/cppjieba/include
@@ -45,6 +48,7 @@ set(MCDK_LITE_SOURCES
     src/main.cpp
     src/app/runtime_paths.cpp
     src/app/server_runtime.cpp
+    src/project_analysis/project_analyzer.cpp
 )
 
 # 平台处理函数封装
@@ -81,6 +85,8 @@ function(mcdk_add_target target_name)
     target_link_libraries(${target_name} PRIVATE
         mcp
         cppjieba
+        tree-sitter
+        tree-sitter-python
         nlohmann_json::nlohmann_json
         Threads::Threads
     )
