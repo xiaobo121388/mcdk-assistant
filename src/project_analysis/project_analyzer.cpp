@@ -558,6 +558,27 @@ ProjectIndex build_index_for_behavior_pack(const fs::path& behavior_pack_root,
     return index;
 }
 
+bool directory_contains_mod_main(const fs::path& root, int max_depth = 8) {
+    if (!check_is_directory(root)) return false;
+    std::error_code ec;
+    fs::recursive_directory_iterator it(root, ec), end;
+    while (!ec && it != end) {
+        auto rel = it->path().lexically_relative(root);
+        if (static_cast<int>(std::distance(rel.begin(), rel.end())) > max_depth) {
+            if (it->is_directory(ec)) it.disable_recursion_pending();
+            it.increment(ec);
+            continue;
+        }
+        if (it->is_directory(ec) && should_skip_dir(it->path(), false)) {
+            it.disable_recursion_pending();
+        } else if (it->is_regular_file(ec) && it->path().filename() == "modMain.py") {
+            return true;
+        }
+        it.increment(ec);
+    }
+    return false;
+}
+
 ScopeResolution resolve_scope_for_target(const fs::path& target_path, int max_upward_levels) {
     ScopeResolution scope;
     scope.requested_path = target_path;
@@ -567,10 +588,19 @@ ScopeResolution resolve_scope_for_target(const fs::path& target_path, int max_up
     if (check_is_regular_file(start)) start = start.parent_path();
     start = normalize_path(start);
 
-    // 如果起始目录本身包含 manifest.json，说明这就是行为包根，无需上溯
+    // 如果起始目录本身包含 manifest.json，说明这就是行为包根，无需上溯。
     if (path_exists(start / "manifest.json")) {
         scope.behavior_pack_root = start;
         scope.scope_mode = "behavior-pack";
+        scope.upward_steps = 0;
+        return scope;
+    }
+
+    // 网易 MOD 工程经常缺少位于用户所选根目录的 manifest.json，但其下层会有一个或多个 modMain.py。
+    // 这种情况应把用户传入目录当作“可发现行为包根”，否则引用分析会退化成 local-only 空结果。
+    if (directory_contains_mod_main(start)) {
+        scope.behavior_pack_root = start;
+        scope.scope_mode = "behavior-pack-discovered";
         scope.upward_steps = 0;
         return scope;
     }
@@ -783,6 +813,245 @@ std::string summarize_top_modules(const ProjectIndex& index, const ModPackage& p
     return oss.str();
 }
 
+std::string summarize_symbols(const FileAnalysis& file, int limit = 12) {
+    if (file.symbols.empty()) return "无";
+    std::ostringstream oss;
+    int shown = 0;
+    for (const auto& symbol : file.symbols) {
+        if (shown >= limit) break;
+        if (shown) oss << ", ";
+        oss << symbol.kind << " " << symbol.name << "@" << symbol.line;
+        ++shown;
+    }
+    if (static_cast<int>(file.symbols.size()) > shown) {
+        oss << ", ... +" << (file.symbols.size() - shown);
+    }
+    return oss.str();
+}
+
+std::string summarize_imports(const FileAnalysis& file, bool only_internal, int limit = 10) {
+    std::vector<std::string> rows;
+    for (const auto& imp : file.imports) {
+        if (only_internal && !imp.internal) continue;
+        std::ostringstream item;
+        item << (imp.resolved_module.empty() ? imp.raw_module : imp.resolved_module);
+        if (!imp.imported_name.empty()) item << "." << imp.imported_name;
+        item << "@" << imp.line << "[" << (imp.internal ? "internal" : imp.external_kind) << "]";
+        rows.push_back(item.str());
+    }
+    std::sort(rows.begin(), rows.end());
+    rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
+    if (rows.empty()) return "无";
+    std::ostringstream oss;
+    const int shown = std::min(limit, static_cast<int>(rows.size()));
+    for (int i = 0; i < shown; ++i) {
+        if (i) oss << "; ";
+        oss << rows[i];
+    }
+    if (static_cast<int>(rows.size()) > shown) oss << "; ... +" << (rows.size() - shown);
+    return oss.str();
+}
+
+std::string summarize_directory_tree(const ProjectIndex& index, const ModPackage& pkg) {
+    struct DirRow { int files = 0; int modules = 0; int symbols = 0; int in_degree = 0; int out_degree = 0; };
+    std::map<std::string, DirRow> rows;
+
+    for (const auto& module_name : pkg.modules) {
+        auto fit = index.files_by_module.find(module_name);
+        if (fit == index.files_by_module.end()) continue;
+        std::error_code ec;
+        auto rel = fs::relative(fit->second.path.parent_path(), pkg.root_dir, ec);
+        std::string dir = ec || rel.empty() || rel == "." ? "." : generic_u8string_to_string(rel);
+        auto& row = rows[dir];
+        row.files += 1;
+        row.modules += 1;
+        row.symbols += static_cast<int>(fit->second.symbols.size());
+        auto out_it = index.forward_deps.find(module_name);
+        if (out_it != index.forward_deps.end()) row.out_degree += static_cast<int>(out_it->second.size());
+        auto in_it = index.reverse_deps.find(module_name);
+        if (in_it != index.reverse_deps.end()) row.in_degree += static_cast<int>(in_it->second.size());
+    }
+
+    std::ostringstream oss;
+    for (const auto& [dir, row] : rows) {
+        oss << "  - " << dir << " (files=" << row.files
+            << ", modules=" << row.modules
+            << ", symbols=" << row.symbols
+            << ", in=" << row.in_degree
+            << ", out=" << row.out_degree << ")\n";
+    }
+    return oss.str();
+}
+
+std::string first_relative_dir(const FileAnalysis& file, const fs::path& root) {
+    std::error_code ec;
+    auto rel = fs::relative(file.path, root, ec);
+    if (ec || rel.empty()) return ".";
+    auto it = rel.begin();
+    if (it == rel.end()) return ".";
+    if (std::next(it) == rel.end()) return ".";
+    return it->string();
+}
+
+std::string summarize_subsystems(const ProjectIndex& index, const ModPackage& pkg, int limit) {
+    struct Row { std::string name; int modules = 0; int symbols = 0; int in_degree = 0; int out_degree = 0; std::string example; };
+    std::map<std::string, Row> grouped;
+    for (const auto& module_name : pkg.modules) {
+        auto fit = index.files_by_module.find(module_name);
+        if (fit == index.files_by_module.end()) continue;
+        auto key = first_relative_dir(fit->second, pkg.root_dir);
+        auto& row = grouped[key];
+        row.name = key;
+        row.modules += 1;
+        row.symbols += static_cast<int>(fit->second.symbols.size());
+        if (row.example.empty()) row.example = module_name;
+        auto out_it = index.forward_deps.find(module_name);
+        if (out_it != index.forward_deps.end()) row.out_degree += static_cast<int>(out_it->second.size());
+        auto in_it = index.reverse_deps.find(module_name);
+        if (in_it != index.reverse_deps.end()) row.in_degree += static_cast<int>(in_it->second.size());
+    }
+
+    std::vector<Row> rows;
+    for (auto& [_, row] : grouped) rows.push_back(row);
+    std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) {
+        const auto aw = a.in_degree + a.out_degree + a.modules;
+        const auto bw = b.in_degree + b.out_degree + b.modules;
+        if (aw != bw) return aw > bw;
+        return a.name < b.name;
+    });
+
+    std::ostringstream oss;
+    int shown = 0;
+    for (const auto& row : rows) {
+        if (shown++ >= limit) break;
+        oss << "- " << row.name
+            << "：modules=" << row.modules
+            << ", symbols=" << row.symbols
+            << ", in=" << row.in_degree
+            << ", out=" << row.out_degree
+            << ", example=" << row.example << "\n";
+    }
+    if (static_cast<int>(rows.size()) > shown) oss << "- ... 其余 " << (rows.size() - shown) << " 个子系统省略\n";
+    return oss.str();
+}
+
+std::string summarize_dependency_hubs(const ProjectIndex& index, int limit) {
+    struct Row { std::string module; size_t in_degree; size_t out_degree; };
+    std::vector<Row> rows;
+    for (const auto& [module_name, file] : index.files_by_module) {
+        size_t in_degree = 0;
+        size_t out_degree = 0;
+        auto out_it = index.forward_deps.find(module_name);
+        if (out_it != index.forward_deps.end()) out_degree = out_it->second.size();
+        auto in_it = index.reverse_deps.find(module_name);
+        if (in_it != index.reverse_deps.end()) in_degree = in_it->second.size();
+        if (in_degree || out_degree) rows.push_back({module_name, in_degree, out_degree});
+    }
+    std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) {
+        const auto aw = a.in_degree + a.out_degree;
+        const auto bw = b.in_degree + b.out_degree;
+        if (aw != bw) return aw > bw;
+        return a.module < b.module;
+    });
+    std::ostringstream oss;
+    int shown = 0;
+    for (const auto& row : rows) {
+        if (shown++ >= limit) break;
+        oss << "- " << row.module << " (被依赖=" << row.in_degree << ", 依赖=" << row.out_degree << ")\n";
+    }
+    return oss.str();
+}
+
+std::string summarize_dependencies_aggregate(const ProjectIndex& index,
+                                             const std::vector<std::string>& modules,
+                                             int limit) {
+    struct Row { std::string dep; int count = 0; int internal_count = 0; std::set<std::string> examples; };
+    std::map<std::string, Row> grouped;
+    for (const auto& module : modules) {
+        auto fit = index.files_by_module.find(module);
+        if (fit == index.files_by_module.end()) continue;
+        std::set<std::string> seen_in_module;
+        for (const auto& imp : fit->second.imports) {
+            auto dep = imp.resolved_module.empty() ? imp.raw_module : imp.resolved_module;
+            if (dep.empty()) continue;
+            auto& row = grouped[dep];
+            row.dep = dep;
+            if (seen_in_module.insert(dep).second) ++row.count;
+            if (imp.internal) ++row.internal_count;
+            if (row.examples.size() < 3) row.examples.insert(module + ":" + std::to_string(imp.line));
+        }
+    }
+
+    std::vector<Row> rows;
+    for (auto& [_, row] : grouped) rows.push_back(row);
+    std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) {
+        if (a.count != b.count) return a.count > b.count;
+        if (a.internal_count != b.internal_count) return a.internal_count > b.internal_count;
+        return a.dep < b.dep;
+    });
+
+    std::ostringstream oss;
+    int shown = 0;
+    for (const auto& row : rows) {
+        if (shown++ >= limit) break;
+        oss << "- " << row.dep << "：被目标范围内 " << row.count << " 个模块依赖"
+            << "，internal_refs=" << row.internal_count;
+        if (!row.examples.empty()) oss << "，示例=" << join(std::vector<std::string>(row.examples.begin(), row.examples.end()), ", ");
+        oss << "\n";
+    }
+    if (static_cast<int>(rows.size()) > shown) oss << "- ... 其余 " << (rows.size() - shown) << " 个依赖省略\n";
+    return oss.str();
+}
+
+std::string summarize_module_inventory(const ProjectIndex& index, const ModPackage& pkg, int max_modules) {
+    struct Row { std::string module; size_t in_degree; size_t out_degree; size_t symbols; };
+    std::vector<Row> rows;
+    for (const auto& module_name : pkg.modules) {
+        auto fit = index.files_by_module.find(module_name);
+        if (fit == index.files_by_module.end()) continue;
+        size_t in_degree = 0;
+        size_t out_degree = 0;
+        auto out_it = index.forward_deps.find(module_name);
+        if (out_it != index.forward_deps.end()) out_degree = out_it->second.size();
+        auto in_it = index.reverse_deps.find(module_name);
+        if (in_it != index.reverse_deps.end()) in_degree = in_it->second.size();
+        rows.push_back({module_name, in_degree, out_degree, fit->second.symbols.size()});
+    }
+    std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) {
+        const auto aw = a.in_degree + a.out_degree;
+        const auto bw = b.in_degree + b.out_degree;
+        if (aw != bw) return aw > bw;
+        if (a.symbols != b.symbols) return a.symbols > b.symbols;
+        return a.module < b.module;
+    });
+
+    std::ostringstream oss;
+    int shown = 0;
+    for (const auto& row : rows) {
+        if (shown++ >= max_modules) break;
+        auto fit = index.files_by_module.find(row.module);
+        if (fit == index.files_by_module.end()) continue;
+        const auto& file = fit->second;
+        std::error_code ec;
+        auto rel = fs::relative(file.path, pkg.root_dir, ec);
+
+        oss << "- " << row.module << "\n";
+        oss << "  - role_hint: " << (ec ? path_to_utf8(file.path) : generic_u8string_to_string(rel)) << "\n";
+        oss << "  - health: " << file.health
+            << ", confidence=" << format_double(file.confidence)
+            << ", fallback=" << (file.fallback_used ? "yes" : "no") << "\n";
+        oss << "  - importance: in=" << row.in_degree << ", out=" << row.out_degree
+            << ", symbols=" << row.symbols << "\n";
+        oss << "  - public_symbols_sample: " << summarize_symbols(file, 10) << "\n";
+        oss << "  - internal_deps_sample: " << summarize_imports(file, true, 8) << "\n";
+    }
+    if (static_cast<int>(rows.size()) > max_modules) {
+        oss << "- ... 其余 " << (rows.size() - max_modules)
+            << " 个模块已省略；若需深挖，请对具体目录/文件调用 scan_py2_import_chain。\n";
+    }
+    return oss.str();
+}
+
 std::string format_behavior_pack_report(const ProjectIndex& index, const AnalysisOptions& options) {
     std::ostringstream oss;
     oss << "Python 2 行为包架构分析\n";
@@ -797,6 +1066,11 @@ std::string format_behavior_pack_report(const ProjectIndex& index, const Analysi
         oss << "\n";
     }
 
+    oss << "AI 阅读建议\n";
+    oss << "- 先看“子系统画像”和“关键依赖枢纽”确定架构层次。\n";
+    oss << "- 再对具体目录/文件调用 scan_py2_import_chain 获取局部调用上下文。\n";
+    oss << "- 下方模块画像是抽样摘要，不再 dump 全量模块，避免淹没主线。\n\n";
+
     oss << "入口与子包总览\n";
     for (const auto& pkg : index.mod_packages) {
         oss << "- " << pkg.name << "\n";
@@ -807,6 +1081,22 @@ std::string format_behavior_pack_report(const ProjectIndex& index, const Analysi
         oss << summarize_top_modules(index, pkg, std::max(3, options.depth * 2), options.include_symbols);
     }
     oss << "\n";
+
+    oss << "子系统画像（按目录聚合）\n";
+    for (const auto& pkg : index.mod_packages) {
+        oss << "# " << pkg.name << "\n";
+        oss << summarize_subsystems(index, pkg, std::max(8, options.depth * 4));
+    }
+    oss << "\n";
+
+    oss << "关键依赖枢纽\n";
+    oss << summarize_dependency_hubs(index, std::max(8, options.depth * 4)) << "\n";
+
+    oss << "代表模块画像（按重要度抽样）\n";
+    for (const auto& pkg : index.mod_packages) {
+        oss << "# " << pkg.name << "\n";
+        oss << summarize_module_inventory(index, pkg, std::max(8, options.depth * 4)) << "\n";
+    }
 
     oss << "文件健康摘要\n";
     oss << summarize_file_health(index, std::max(6, options.depth * 5)) << "\n";
@@ -840,6 +1130,13 @@ std::string format_reference_report(const ProjectIndex& index,
 
     if (selection.modules.empty()) {
         oss << "未能在当前作用域内解析到目标模块。\n";
+        if (!index.mod_packages.empty()) {
+            oss << "\n当前作用域可用模块清单\n";
+            for (const auto& pkg : index.mod_packages) {
+                oss << "# " << pkg.name << "\n";
+                oss << summarize_module_inventory(index, pkg, std::max(10, options.depth * 6)) << "\n";
+            }
+        }
         return oss.str();
     }
 
@@ -858,12 +1155,26 @@ std::string format_reference_report(const ProjectIndex& index,
 
     oss << "目标摘要\n";
     oss << "- 命中模块数: " << selection.modules.size() << "\n";
-    for (const auto& module : selection.modules) {
-        auto it = index.files_by_module.find(module);
-        if (it == index.files_by_module.end()) continue;
-        oss << "- " << module << " -> " << path_to_utf8(it->second.path)
-            << " [health=" << it->second.health
-            << ", confidence=" << format_double(it->second.confidence) << "]\n";
+    oss << "- 输出策略: 聚合优先 + 代表模块抽样；避免对大目录逐文件 dump。\n";
+    if (selection.modules.size() <= 8) {
+        for (const auto& module : selection.modules) {
+            auto it = index.files_by_module.find(module);
+            if (it == index.files_by_module.end()) continue;
+            const auto& file = it->second;
+            oss << "- " << module << " -> " << path_to_utf8(file.path)
+                << " [health=" << file.health
+                << ", confidence=" << format_double(file.confidence) << "]\n";
+            oss << "  - symbols: " << summarize_symbols(file, 12) << "\n";
+            oss << "  - internal_imports: " << summarize_imports(file, true, 8) << "\n";
+            oss << "  - all_imports: " << summarize_imports(file, false, 8) << "\n";
+        }
+    } else {
+        ModPackage target_brief;
+        target_brief.name = "target";
+        target_brief.root_dir = scope.mod_root.empty() ? scope.behavior_pack_root : scope.mod_root;
+        target_brief.modules = selection.modules;
+        oss << "- 目标范围过大，以下仅展示高价值代表模块：\n";
+        oss << summarize_module_inventory(index, target_brief, std::max(8, options.depth * 3));
     }
     oss << "\n";
 
@@ -887,19 +1198,15 @@ std::string format_reference_report(const ProjectIndex& index,
     }
     oss << "\n";
 
-    oss << "目标对外依赖\n";
-    for (const auto& module : selection.modules) {
-        auto fit = index.files_by_module.find(module);
-        if (fit == index.files_by_module.end()) continue;
-        int shown = 0;
-        for (const auto& imp : fit->second.imports) {
-            if (shown++ >= std::max(4, options.depth * 3)) break;
-            oss << "- " << module << " -> "
-                << (imp.resolved_module.empty() ? imp.raw_module : imp.resolved_module)
-                << " [" << (imp.internal ? "internal" : imp.external_kind)
-                << ", confidence=" << format_double(imp.confidence) << "]\n";
-        }
-    }
+    oss << "目标范围依赖聚合\n";
+    oss << summarize_dependencies_aggregate(index, selection.modules, std::max(10, options.depth * 5)) << "\n";
+
+    oss << "目标代表模块画像\n";
+    ModPackage selected;
+    selected.name = "selected";
+    selected.root_dir = scope.mod_root.empty() ? scope.behavior_pack_root : scope.mod_root;
+    selected.modules = selection.modules;
+    oss << summarize_module_inventory(index, selected, std::max(8, options.depth * 4));
     oss << "\n";
 
     oss << "模糊说明\n";
