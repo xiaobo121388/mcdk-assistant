@@ -3,8 +3,11 @@
 #include "common/path_utils.hpp"
 #include "search/search_service.hpp"
 #include "tools/register_netease.hpp"
-#include "tools/register_python_analysis.hpp"
 #include "tools/register_search.hpp"
+
+#if !defined(MCDK_SERVER) && !defined(MCDK_INDEX_COMPILER)
+#include "tools/register_python_analysis.hpp"
+#endif
 
 #ifndef MCDK_LITE
 #include "tools/register_animation.hpp"
@@ -74,7 +77,7 @@ void register_tools(mcp::server& srv,
 
     mcdk::register_search_tools(srv, search_svc, effective_knowledge_dir);
     mcdk::register_netease_tools(srv);
-#ifndef MCDK_SERVER
+#if !defined(MCDK_SERVER) && !defined(MCDK_INDEX_COMPILER)
     mcdk::register_python_analysis_tools(srv);
 #endif
 #ifndef MCDK_LITE

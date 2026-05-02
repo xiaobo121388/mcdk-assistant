@@ -15,7 +15,7 @@ target_link_libraries(mcdk-index-compiler PRIVATE
     Threads::Threads
 )
 
-target_compile_definitions(mcdk-index-compiler PRIVATE MCDK_LITE)
+target_compile_definitions(mcdk-index-compiler PRIVATE MCDK_LITE MCDK_INDEX_COMPILER)
 
 if(WIN32)
     target_link_libraries(mcdk-index-compiler PRIVATE ws2_32)

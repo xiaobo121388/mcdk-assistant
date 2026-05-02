@@ -9,6 +9,7 @@
 #include <cctype>
 #include <fstream>
 #include <iomanip>
+#include <iterator>
 #include <map>
 #include <optional>
 #include <regex>
